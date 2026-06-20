@@ -1,0 +1,55 @@
+# Habitat Simulator Scene Configuration
+scene_dataset_config_file: "habitat-sim/data/replica_cad/replicaCAD.scene_dataset_config.json"
+scene_id: "apt_0"
+
+# Output configuration
+output_dir: "output_mcap"
+output_filename: "trajectory_data.mcap"
+
+# Path planning configuration (ZigZag)
+planner:
+  type: "zigzag"
+  resolution: 0.05 # m / pixel 
+  wall_distance: 0.3
+  zigzag_spacing: 0.6
+  linear_step: 0.25
+  angular_step: 10.0 # degrees
+  sweep_direction: "horizontal"
+  agent_height: 1.6
+
+# 3D LiDAR Sensor configuration & TF offsets
+sensor:
+  lidar3d:
+    uuid: "lidar_3d"
+    # Position offset relative to agent's base_link [x, y, z] (Y-up)
+    position: [0.0, 0.3, 0.0]
+    # Orientation offset quaternion relative to agent's base_link [x, y, z, w]
+    orientation: [0.0, 0.0, 0.0, 1.0]
+    min_distance: 0.1
+    max_distance: 30.0
+    azimuth_range: [-180.0, 180.0]
+    altitude_range: [-15.0, 15.0]
+    azimuth_bins: 360
+    altitude_bins: 16
+
+# MCAP Export configurations mapping data types to topics & schemas
+mcap_export:
+  channels:
+    pose:
+      topic: "/pose"
+      schema: "geometry_msgs/msg/PoseStamped"
+    point_cloud:
+      topic: "/lidar"
+      schema: "sensor_msgs/msg/PointCloud2"
+    occupancy_grid:
+      topic: "/map"
+      schema: "nav_msgs/msg/OccupancyGrid"
+    map_3d_marker_array:
+      topic: "/map_3d"
+      schema: "visualization_msgs/msg/MarkerArray"
+    tf_static:
+      topic: "/tf_static"
+      schema: "tf2_msgs/msg/TFMessage"
+    tf_dynamic:
+      topic: "/tf"
+      schema: "tf2_msgs/msg/TFMessage"

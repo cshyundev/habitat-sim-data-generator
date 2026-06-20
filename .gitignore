@@ -1,0 +1,27 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# IDE / Editor config
+.vscode/
+.idea/
+
+# Local simulation & datasets
+habitat-sim/
+data/
+
+# Generated outputs & samples
+output_map/
+output_mcap/
+convertion_samples/
+tests/output/
+scratch/
+
+# MCAP serialization files
+*.mcap
