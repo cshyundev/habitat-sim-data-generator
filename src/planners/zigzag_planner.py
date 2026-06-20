@@ -206,6 +206,7 @@ class ZigZagPlanner(BasePlanner):
         waypoints = self._compress_path(grid_path)
         
         # 5. Simulate agent motion along the waypoints and sample Pose3D objects
+        step_dt_ns = kwargs.get("step_dt_ns", 100000000)
         poses = self._simulate_motion(
             waypoints=waypoints,
             resolution=resolution,
@@ -215,7 +216,8 @@ class ZigZagPlanner(BasePlanner):
             linear_step=linear_step,
             angular_step=angular_step,
             start_pose=start_pose,
-            map_height=occ_grid.height
+            map_height=occ_grid.height,
+            step_dt_ns=step_dt_ns
         )
         
         # 6. Generate and save visualization map with path overlay
@@ -525,7 +527,8 @@ class ZigZagPlanner(BasePlanner):
         linear_step: float,
         angular_step: float,
         start_pose: Optional[Pose3D],
-        map_height: int
+        map_height: int,
+        step_dt_ns: int = 100000000
     ) -> List[Pose3D]:
         """Simulates robot motion, sampling Pose3D points along linear sweeps and in-place rotations."""
         if not waypoints:
@@ -538,6 +541,7 @@ class ZigZagPlanner(BasePlanner):
             world_pts.append(np.array([x, height_offset, z], dtype=np.float32))
 
         sampled_poses: List[Pose3D] = []
+        sim_time_ns = 0
         
         if len(world_pts) > 1:
             first_segment = world_pts[1] - world_pts[0]
@@ -547,7 +551,10 @@ class ZigZagPlanner(BasePlanner):
             
         current_pos = np.array(world_pts[0], dtype=np.float32)
         start_q = np.array([0.0, math.sin(current_yaw / 2), 0.0, math.cos(current_yaw / 2)], dtype=np.float32)
-        sampled_poses.append(Pose3D(current_pos, start_q))
+        
+        # 1. Start Pose
+        sampled_poses.append(Pose3D(current_pos, start_q, timestamp_ns=sim_time_ns))
+        sim_time_ns += step_dt_ns
 
         for i in range(len(world_pts) - 1):
             p_start = world_pts[i]
@@ -569,10 +576,12 @@ class ZigZagPlanner(BasePlanner):
                 for step in range(1, num_rot_steps + 1):
                     temp_yaw = current_yaw + step_sign * step * angular_step
                     q_step = np.array([0.0, math.sin(temp_yaw / 2), 0.0, math.cos(temp_yaw / 2)], dtype=np.float32)
-                    sampled_poses.append(Pose3D(p_start, q_step))
+                    sampled_poses.append(Pose3D(p_start, q_step, timestamp_ns=sim_time_ns))
+                    sim_time_ns += step_dt_ns
                     
                 q_target = np.array([0.0, math.sin(target_yaw / 2), 0.0, math.cos(target_yaw / 2)], dtype=np.float32)
-                sampled_poses.append(Pose3D(p_start, q_target))
+                sampled_poses.append(Pose3D(p_start, q_target, timestamp_ns=sim_time_ns))
+                sim_time_ns += step_dt_ns
                 current_yaw = target_yaw
 
             num_lin_steps = int(math.floor(segment_len / linear_step))
@@ -581,9 +590,11 @@ class ZigZagPlanner(BasePlanner):
             
             for step in range(1, num_lin_steps + 1):
                 temp_pos = p_start + unit_dir * (step * linear_step)
-                sampled_poses.append(Pose3D(temp_pos, q_linear))
+                sampled_poses.append(Pose3D(temp_pos, q_linear, timestamp_ns=sim_time_ns))
+                sim_time_ns += step_dt_ns
                 
-            sampled_poses.append(Pose3D(p_end, q_linear))
+            sampled_poses.append(Pose3D(p_end, q_linear, timestamp_ns=sim_time_ns))
+            sim_time_ns += step_dt_ns
             current_pos = p_end
 
         return sampled_poses

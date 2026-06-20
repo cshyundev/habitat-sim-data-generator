@@ -350,6 +350,58 @@ def serialize_tf_message(
     return bytes(data)
 
 
+def serialize_image(
+    sec: int, nanosec: int, frame_id: str,
+    height: int, width: int, encoding: str,
+    is_bigendian: int, step: int, image_data: np.ndarray
+) -> bytes:
+    """Serializes sensor_msgs/msg/Image to ROS 2 CDR format."""
+    data = bytearray([0x00, 0x01, 0x00, 0x00])
+    
+    # 1. Header stamp: sec, nanosec
+    data.extend(struct.pack("<iI", sec, nanosec))
+    
+    # 2. Header frame_id: string
+    frame_bytes = frame_id.encode('utf-8') + b'\x00'
+    data.extend(struct.pack("<I", len(frame_bytes)))
+    data.extend(frame_bytes)
+    
+    # Align for height, width (uint32)
+    offset = len(data) - 4
+    remainder = offset % 4
+    if remainder != 0:
+        data.extend(b'\x00' * (4 - remainder))
+    data.extend(struct.pack("<II", height, width))
+    
+    # 3. encoding: string
+    enc_bytes = encoding.encode('utf-8') + b'\x00'
+    offset = len(data) - 4
+    remainder = offset % 4
+    if remainder != 0:
+        data.extend(b'\x00' * (4 - remainder))
+    data.extend(struct.pack("<I", len(enc_bytes)))
+    data.extend(enc_bytes)
+    
+    # 4. is_bigendian (uint8), step (uint32)
+    data.append(is_bigendian)
+    offset = len(data) - 4
+    remainder = offset % 4
+    if remainder != 0:
+        data.extend(b'\x00' * (4 - remainder))
+    data.extend(struct.pack("<I", step))
+    
+    # 5. uint8[] data: sequence of bytes
+    raw_data = image_data.tobytes()
+    offset = len(data) - 4
+    remainder = offset % 4
+    if remainder != 0:
+        data.extend(b'\x00' * (4 - remainder))
+    data.extend(struct.pack("<I", len(raw_data)))
+    data.extend(raw_data)
+    
+    return bytes(data)
+
+
 # ==========================================
 # MCAP Exporter Implementation
 # ==========================================
@@ -386,26 +438,32 @@ class McapExporter:
             if not topic or not schema_name:
                 continue
                 
-            # If schema not registered yet, register it
-            if schema_name not in self.schemas:
-                schema_id = self.writer.register_schema(
-                    name=schema_name,
-                    encoding="ros2msg",
-                    data=b""
-                )
-                self.schemas[schema_name] = schema_id
+            self.register_channel_dynamic(key, topic, schema_name)
+
+    def register_channel_dynamic(self, key: str, topic: str, schema_name: str) -> None:
+        """Dynamically registers a schema and channel for sensor output if not already present."""
+        if key in self.channels:
+            return
             
-            schema_id = self.schemas[schema_name]
-            channel_id = self.writer.register_channel(
-                schema_id=schema_id,
-                topic=topic,
-                message_encoding="cdr"
+        if schema_name not in self.schemas:
+            schema_id = self.writer.register_schema(
+                name=schema_name,
+                encoding="ros2msg",
+                data=b""
             )
-            self.channels[key] = channel_id
+            self.schemas[schema_name] = schema_id
+            
+        schema_id = self.schemas[schema_name]
+        channel_id = self.writer.register_channel(
+            schema_id=schema_id,
+            topic=topic,
+            message_encoding="cdr"
+        )
+        self.channels[key] = channel_id
 
     def _get_channel_id(self, key: str) -> int:
         if key not in self.channels:
-            raise KeyError(f"Channel for '{key}' is not registered. Please define it in config.yaml under mcap_export.channels.")
+            raise KeyError(f"Channel for '{key}' is not registered. Please define it or register dynamically.")
         return self.channels[key]
 
     def write_pose(
@@ -520,9 +578,48 @@ class McapExporter:
             publish_time=timestamp_ns
         )
 
+    def write_image(
+        self, timestamp_ns: int, frame_id: str, channel_key: str,
+        image_data: np.ndarray, encoding: str
+    ) -> None:
+        """Writes Image (sensor_msgs/msg/Image) message."""
+        sec = int(timestamp_ns // 1000000000)
+        nanosec = int(timestamp_ns % 1000000000)
+        
+        # Determine image geometry
+        if image_data.ndim == 3:
+            height, width, channels = image_data.shape
+        else:
+            height, width = image_data.shape
+            channels = 1
+            
+        is_bigendian = 0
+        
+        # Calculate step
+        if image_data.dtype == np.uint8:
+            step = width * channels * 1
+        elif image_data.dtype == np.float32:
+            step = width * channels * 4
+        else:
+            step = width * channels * image_data.itemsize
+            
+        data = serialize_image(
+            sec=sec, nanosec=nanosec, frame_id=frame_id,
+            height=height, width=width, encoding=encoding,
+            is_bigendian=is_bigendian, step=step, image_data=image_data
+        )
+        channel_id = self._get_channel_id(channel_key)
+        self.writer.add_message(
+            channel_id=channel_id,
+            log_time=timestamp_ns,
+            data=data,
+            publish_time=timestamp_ns
+        )
+
     def finish(self) -> None:
         """Finishes writing and closes the file."""
         if self.writer:
             self.writer.finish()
         if self.file:
             self.file.close()
+

@@ -17,20 +17,62 @@ planner:
   sweep_direction: "horizontal"
   agent_height: 1.6
 
-# 3D LiDAR Sensor configuration & TF offsets
-sensor:
-  lidar3d:
-    uuid: "lidar_3d"
-    # Position offset relative to agent's base_link [x, y, z] (Y-up)
-    position: [0.0, 0.3, 0.0]
-    # Orientation offset quaternion relative to agent's base_link [x, y, z, w]
-    orientation: [0.0, 0.0, 0.0, 1.0]
-    min_distance: 0.1
-    max_distance: 30.0
-    azimuth_range: [-180.0, 180.0]
-    altitude_range: [-15.0, 15.0]
-    azimuth_bins: 360
-    altitude_bins: 16
+# Robot URDF-like Definition
+robot:
+  base_link: "base_link"
+  links:
+    - name: "base_link"
+      parent: null
+      position: [0.0, 0.0, 0.0]
+      orientation: [0.0, 0.0, 0.0, 1.0]
+    - name: "lidar_link"
+      parent: "base_link"
+      position: [0.0, 0.3, 0.0]
+      orientation: [0.0, 0.0, 0.0, 1.0]
+    - name: "camera_link"
+      parent: "base_link"
+      position: [0.0, 0.5, 0.1]
+      orientation: [0.0, 0.0, 0.0, 1.0]
+  sensors:
+    - name: "lidar_3d"
+      type: "lidar3d"
+      parent_link: "lidar_link"
+      hz: 10
+      parameters:
+        lidar_type: "ideal"
+        min_distance: 0.1
+        max_distance: 30.0
+        azimuth_range: [-180.0, 180.0]
+        altitude_range: [-15.0, 15.0]
+        azimuth_bins: 360
+        altitude_bins: 16
+        topic: "/lidar"
+        schema: "sensor_msgs/msg/PointCloud2"
+    - name: "camera_rgb"
+      type: "camera"
+      parent_link: "camera_link"
+      hz: 10
+      parameters:
+        model: "pinhole"
+        modality: "rgb"
+        width: 640
+        height: 480
+        hfov: 90.0
+        topic: "/camera/rgb"
+        schema: "sensor_msgs/msg/Image"
+    - name: "camera_depth"
+      type: "camera"
+      parent_link: "camera_link"
+      hz: 10
+      parameters:
+        model: "pinhole"
+        modality: "depth"
+        width: 640
+        height: 480
+        hfov: 90.0
+        topic: "/camera/depth"
+        schema: "sensor_msgs/msg/Image"
+
 
 # MCAP Export configurations mapping data types to topics & schemas
 mcap_export:
