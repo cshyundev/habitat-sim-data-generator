@@ -54,7 +54,7 @@ def main():
         occ_grid = planner.get_latest_occupancy_grid()
         
         # FOR DEBUG: 궤적이 너무 길면 처음 일부만 수행
-        poses = poses[:100]
+        poses = poses[:10]
         
         if not poses:
             print("[Error] 경로 생성에 실패했습니다. 파이프라인을 중단합니다.")

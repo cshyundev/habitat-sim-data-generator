@@ -15,5 +15,6 @@ dependencies = [
     "mcap-ros2-support>=0.5.7",
     "rerun-sdk>=0.21.0",
     "trimesh>=4.0.0",
-    "pillow>=10.0.0"
+    "pillow>=10.0.0",
+    "matplotlib>=3.10.9",
 ]

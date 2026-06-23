@@ -25,3 +25,5 @@ scratch/
 
 # MCAP serialization files
 *.mcap
+
+*.egg-info
