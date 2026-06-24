@@ -3,7 +3,7 @@ from typing import Any
 
 from src.utils.export import McapExporter
 from src.sensors.base_sensor import BaseSensor
-from src.utils.coords import habitat_to_ros_pointcloud
+from src.utils.coords import habitat_to_ros_pointcloud, habitat_to_ros_position
 
 def export_sensor_data(
     exporter: McapExporter,
@@ -40,6 +40,30 @@ def export_sensor_data(
             points=local_pc_ros
         )
         
+    elif sensor.sensor_type == "imu":
+        av_key = f"{sensor.name}_angular_velocity"
+        la_key = f"{sensor.name}_linear_acceleration"
+        if av_key not in observation or la_key not in observation:
+            return
+
+        # Body-frame (Habitat axes) -> ROS sensor-frame axes. The angular
+        # velocity and linear acceleration are 3-vectors and transform the same
+        # way as a position vector under the Habitat->ROS basis change.
+        angular_velocity_ros = habitat_to_ros_position(
+            np.asarray(observation[av_key], dtype=np.float64)
+        )
+        linear_acceleration_ros = habitat_to_ros_position(
+            np.asarray(observation[la_key], dtype=np.float64)
+        )
+
+        exporter.write_imu(
+            timestamp_ns=timestamp_ns,
+            frame_id=sensor.parent_link,
+            channel_key=sensor.name,
+            angular_velocity=angular_velocity_ros,
+            linear_acceleration=linear_acceleration_ros,
+        )
+
     elif sensor.sensor_type == "camera":
         if sensor.name not in observation:
             return

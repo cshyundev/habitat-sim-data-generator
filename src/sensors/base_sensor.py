@@ -2,6 +2,8 @@ import abc
 from typing import Optional, Dict, Any
 import habitat_sim
 
+from src.datatypes.motion_state import MotionState
+
 class BaseSensor(abc.ABC):
     """
     Abstract base class for all sensors (native and custom).
@@ -60,19 +62,20 @@ class BaseSensor(abc.ABC):
     def get_observation(
         self,
         sim: habitat_sim.Simulator,
-        agent_state: habitat_sim.AgentState,
-        tf_manager: Any,
-        timestamp_ns: int
+        motion_state: MotionState,
+        tf_manager: Any
     ) -> Dict[str, Any]:
         """
         Generates sensor observation data.
-        
+
         Args:
             sim: Habitat simulator instance.
-            agent_state: The current state of the agent.
+            motion_state: The current kinematic state of the robot
+                (pose + body-frame velocities/acceleration + timestamp_ns).
+                Pose-only sensors (camera, lidar) use ``motion_state.pose``;
+                IMU-like sensors use the velocity/acceleration fields.
             tf_manager: The TFManager instance to query frame transforms.
-            timestamp_ns: Current simulation time in nanoseconds.
-            
+
         Returns:
             Dictionary containing topic names mapping to raw data dicts or objects.
         """

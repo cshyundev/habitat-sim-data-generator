@@ -1,0 +1,117 @@
+# Habitat Simulator Scene Configuration (streaming / online-capture pipeline)
+# Used by stream_data.py. generate_data.py keeps using config.yaml unchanged.
+scene_dataset_config_file: "habitat-sim/data/replica_cad/replicaCAD.scene_dataset_config.json"
+scene_id: "apt_0"
+
+# Output configuration
+output_dir: "output_mcap"
+output_filename: "trajectory_stream.mcap"
+
+# Optional safety cap on simulated trajectory length [s] (remove for full run).
+max_duration_sec: 100.0
+
+# Global coverage planner (coarse zigzag waypoints)
+planner:
+  type: "zigzag"
+  resolution: 0.05 # m / pixel
+  wall_distance: 0.3
+  zigzag_spacing: 0.6
+  sweep_direction: "horizontal"
+  agent_height: 1.6
+
+# Local planner (differential-drive RTR, produces timed MotionState)
+local_planner:
+  linear_velocity: 0.3       # m/s
+  linear_acceleration: 0.5   # m/s^2
+  angular_velocity: 1.0      # rad/s
+  angular_acceleration: 2.0  # rad/s^2
+
+# Robot URDF-like Definition
+robot:
+  base_link: "base_link"
+  links:
+    - name: "base_link"
+      parent: null
+      position: [0.0, 0.0, 0.0]
+      orientation: [0.0, 0.0, 0.0, 1.0]
+    - name: "lidar_link"
+      parent: "base_link"
+      position: [0.0, 0.3, 0.0]
+      orientation: [0.0, 0.0, 0.0, 1.0]
+    - name: "camera_link"
+      parent: "base_link"
+      position: [0.0, 0.5, 0.1]
+      orientation: [0.0, 0.0, 0.0, 1.0]
+    - name: "imu_link"
+      parent: "base_link"
+      position: [0.0, 0.0, 0.0]
+      orientation: [0.0, 0.0, 0.0, 1.0]
+  sensors:
+    - name: "lidar_3d"
+      type: "lidar3d"
+      parent_link: "lidar_link"
+      hz: 10
+      parameters:
+        lidar_type: "ideal"
+        min_distance: 0.1
+        max_distance: 30.0
+        azimuth_range: [-180.0, 180.0]
+        altitude_range: [-15.0, 15.0]
+        azimuth_bins: 360
+        altitude_bins: 16
+        topic: "/lidar"
+        schema: "sensor_msgs/msg/PointCloud2"
+    - name: "camera_rgb"
+      type: "camera"
+      parent_link: "camera_link"
+      hz: 10
+      parameters:
+        model: "pinhole"
+        modality: "rgb"
+        width: 640
+        height: 480
+        hfov: 90.0
+        topic: "/camera/rgb"
+        schema: "sensor_msgs/msg/Image"
+    - name: "camera_depth"
+      type: "camera"
+      parent_link: "camera_link"
+      hz: 10
+      parameters:
+        model: "pinhole"
+        modality: "depth"
+        width: 640
+        height: 480
+        hfov: 90.0
+        topic: "/camera/depth"
+        schema: "sensor_msgs/msg/Image"
+    - name: "imu"
+      type: "imu"
+      parent_link: "imu_link"
+      hz: 100
+      parameters:
+        topic: "/imu"
+        schema: "sensor_msgs/msg/Imu"
+
+
+# MCAP Export configurations mapping data types to topics & schemas
+mcap_export:
+  channels:
+    pose:
+      topic: "/pose"
+      schema: "geometry_msgs/msg/PoseStamped"
+    point_cloud:
+      topic: "/lidar"
+      schema: "sensor_msgs/msg/PointCloud2"
+    occupancy_grid:
+      topic: "/map"
+      schema: "nav_msgs/msg/OccupancyGrid"
+    map_3d_marker_array:
+      topic: "/map_3d"
+      schema: "visualization_msgs/msg/MarkerArray"
+    tf_static:
+      topic: "/tf_static"
+      schema: "tf2_msgs/msg/TFMessage"
+    tf_dynamic:
+      topic: "/tf"
+      schema: "tf2_msgs/msg/TFMessage"

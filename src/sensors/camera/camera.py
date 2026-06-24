@@ -5,6 +5,7 @@ import habitat_sim
 from typing import Any, Optional, Dict
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.pose import Pose3D
+from src.datatypes.motion_state import MotionState
 
 class CameraSensor(BaseSensor):
     """
@@ -120,13 +121,12 @@ class CameraSensor(BaseSensor):
     def get_observation(
         self,
         sim: habitat_sim.Simulator,
-        agent_state: habitat_sim.AgentState,
-        tf_manager: Any,
-        timestamp_ns: int
+        motion_state: MotionState,
+        tf_manager: Any
     ) -> Dict[str, Any]:
         """
         Retrieves the rendered camera image from simulator's observations.
-        
+
         Note: The simulator's agent pose must be updated before calling this
         to retrieve the correct perspective.
         """

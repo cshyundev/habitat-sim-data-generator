@@ -5,6 +5,7 @@ from typing import Any
 # pyrefly: ignore [missing-import]
 from src.sensors.lidar3d.base_lidar import LiDAR3D
 from src.datatypes.pose import Pose3D
+from src.datatypes.motion_state import MotionState
 
 class IdealLiDAR3D(LiDAR3D):
     """
@@ -68,22 +69,23 @@ class IdealLiDAR3D(LiDAR3D):
     def get_observation(
         self,
         sim: habitat_sim.Simulator,
-        agent_state: habitat_sim.AgentState,
-        tf_manager: Any,
-        timestamp_ns: int
+        motion_state: MotionState,
+        tf_manager: Any
     ) -> dict:
         """
         Run spherical ray casting to generate range and semantic images.
         """
         H, W = self.altitude_bins, self.azimuth_bins
-        
-        agent_pos = np.asarray(agent_state.position)
-        agent_rot = agent_state.rotation
-        q_agent_xyzw = np.array([agent_rot.x, agent_rot.y, agent_rot.z, agent_rot.w])
-        
+
+        agent_pos = np.asarray(motion_state.position, dtype=np.float64)
+        # MotionState.orientation is a quaternion [x, y, z, w] (Habitat frame).
+        q_agent_xyzw = np.asarray(motion_state.orientation, dtype=np.float64)
+        qx, qy, qz, qw = (float(q_agent_xyzw[0]), float(q_agent_xyzw[1]),
+                          float(q_agent_xyzw[2]), float(q_agent_xyzw[3]))
+
         sensor_pos_local = np.array([self.position.x, self.position.y, self.position.z])
-        
-        q_agent_mn = mn.Quaternion(mn.Vector3(agent_rot.x, agent_rot.y, agent_rot.z), agent_rot.w)
+
+        q_agent_mn = mn.Quaternion(mn.Vector3(qx, qy, qz), qw)
         
         sensor_pos_global = agent_pos + self._rotate_vectors(sensor_pos_local[np.newaxis, :], q_agent_xyzw)[0]
         

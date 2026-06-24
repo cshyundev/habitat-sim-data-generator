@@ -1,6 +1,7 @@
 import os
 import struct
 import numpy as np
+from typing import Optional
 from mcap.writer import Writer
 from src.datatypes.pose import Pose3D
 
@@ -402,6 +403,46 @@ def serialize_image(
     return bytes(data)
 
 
+def serialize_imu(
+    sec: int, nanosec: int, frame_id: str,
+    ox: float, oy: float, oz: float, ow: float,
+    avx: float, avy: float, avz: float,
+    lax: float, lay: float, laz: float,
+    orientation_covariance, angular_velocity_covariance, linear_acceleration_covariance
+) -> bytes:
+    """Serializes sensor_msgs/msg/Imu to ROS 2 CDR format."""
+    data = bytearray([0x00, 0x01, 0x00, 0x00])  # Encapsulation header
+
+    # 1. Header stamp: sec, nanosec
+    data.extend(struct.pack("<iI", sec, nanosec))
+
+    # 2. Header frame_id: string
+    frame_bytes = frame_id.encode('utf-8') + b'\x00'
+    data.extend(struct.pack("<I", len(frame_bytes)))
+    data.extend(frame_bytes)
+
+    # Align to 8 bytes before the first double (orientation).
+    offset = len(data) - 4
+    remainder = offset % 8
+    if remainder != 0:
+        data.extend(b'\x00' * (8 - remainder))
+
+    # 3. orientation (geometry_msgs/Quaternion: x, y, z, w)
+    data.extend(struct.pack("<dddd", ox, oy, oz, ow))
+    # 4. orientation_covariance: float64[9] (fixed array, no length prefix)
+    data.extend(struct.pack("<9d", *orientation_covariance))
+    # 5. angular_velocity (geometry_msgs/Vector3)
+    data.extend(struct.pack("<ddd", avx, avy, avz))
+    # 6. angular_velocity_covariance: float64[9]
+    data.extend(struct.pack("<9d", *angular_velocity_covariance))
+    # 7. linear_acceleration (geometry_msgs/Vector3)
+    data.extend(struct.pack("<ddd", lax, lay, laz))
+    # 8. linear_acceleration_covariance: float64[9]
+    data.extend(struct.pack("<9d", *linear_acceleration_covariance))
+
+    return bytes(data)
+
+
 # ==========================================
 # MCAP Exporter Implementation
 # ==========================================
@@ -607,6 +648,50 @@ class McapExporter:
             sec=sec, nanosec=nanosec, frame_id=frame_id,
             height=height, width=width, encoding=encoding,
             is_bigendian=is_bigendian, step=step, image_data=image_data
+        )
+        channel_id = self._get_channel_id(channel_key)
+        self.writer.add_message(
+            channel_id=channel_id,
+            log_time=timestamp_ns,
+            data=data,
+            publish_time=timestamp_ns
+        )
+
+    def write_imu(
+        self, timestamp_ns: int, frame_id: str, channel_key: str,
+        angular_velocity: np.ndarray, linear_acceleration: np.ndarray,
+        orientation: Optional[np.ndarray] = None
+    ) -> None:
+        """
+        Writes an Imu (sensor_msgs/msg/Imu) message.
+
+        For a 6-axis IMU there is no orientation estimate: pass orientation=None
+        and orientation_covariance[0] is set to -1 per ROS convention.
+        Vectors are expected already in the target (ROS) frame.
+        """
+        sec = int(timestamp_ns // 1000000000)
+        nanosec = int(timestamp_ns % 1000000000)
+
+        avx, avy, avz = (float(angular_velocity[0]), float(angular_velocity[1]),
+                         float(angular_velocity[2]))
+        lax, lay, laz = (float(linear_acceleration[0]), float(linear_acceleration[1]),
+                         float(linear_acceleration[2]))
+
+        zero_cov = [0.0] * 9
+        if orientation is None:
+            ox, oy, oz, ow = 0.0, 0.0, 0.0, 1.0
+            orientation_cov = [-1.0] + [0.0] * 8  # -1 => orientation not provided
+        else:
+            ox, oy, oz, ow = (float(orientation[0]), float(orientation[1]),
+                              float(orientation[2]), float(orientation[3]))
+            orientation_cov = list(zero_cov)
+
+        data = serialize_imu(
+            sec, nanosec, frame_id,
+            ox, oy, oz, ow,
+            avx, avy, avz,
+            lax, lay, laz,
+            orientation_cov, zero_cov, list(zero_cov)
         )
         channel_id = self._get_channel_id(channel_key)
         self.writer.add_message(
