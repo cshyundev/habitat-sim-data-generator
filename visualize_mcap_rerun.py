@@ -326,6 +326,83 @@ def deserialize_marker_array(data: bytes):
     return markers
 
 
+def deserialize_image(data: bytes):
+    """
+    Deserializes sensor_msgs/msg/Image from ROS 2 CDR format.
+
+    Mirrors ``serialize_image`` in src/utils/export.py. Returns the decoded image
+    as a numpy array whose dtype/shape match the ROS ``encoding`` field:
+      - rgb8  -> (H, W, 3) uint8
+      - rgba8 -> (H, W, 4) uint8
+      - mono8 -> (H, W)    uint8
+      - 32FC1 -> (H, W)    float32   (depth, metres)
+      - 32SC1 -> (H, W)    int32     (semantic instance/object ids)
+    """
+    ptr = 4  # Skip encapsulation header
+    sec, nanosec = struct.unpack("<iI", data[ptr:ptr + 8])
+    ptr += 8
+
+    str_len = struct.unpack("<I", data[ptr:ptr + 4])[0]
+    ptr += 4
+    frame_id = data[ptr:ptr + str_len - 1].decode("utf-8")
+    ptr += str_len
+
+    # Align to 4 bytes for height, width (uint32)
+    offset = ptr - 4
+    rem = offset % 4
+    if rem != 0:
+        ptr += (4 - rem)
+    height, width = struct.unpack("<II", data[ptr:ptr + 8])
+    ptr += 8
+
+    # encoding: string (align to 4)
+    offset = ptr - 4
+    rem = offset % 4
+    if rem != 0:
+        ptr += (4 - rem)
+    enc_len = struct.unpack("<I", data[ptr:ptr + 4])[0]
+    ptr += 4
+    encoding = data[ptr:ptr + enc_len - 1].decode("utf-8")
+    ptr += enc_len
+
+    # is_bigendian (uint8)
+    ptr += 1
+
+    # step (uint32, align to 4)
+    offset = ptr - 4
+    rem = offset % 4
+    if rem != 0:
+        ptr += (4 - rem)
+    step = struct.unpack("<I", data[ptr:ptr + 4])[0]
+    ptr += 4
+
+    # data: uint8[] sequence (align to 4)
+    offset = ptr - 4
+    rem = offset % 4
+    if rem != 0:
+        ptr += (4 - rem)
+    data_len = struct.unpack("<I", data[ptr:ptr + 4])[0]
+    ptr += 4
+    raw = data[ptr:ptr + data_len]
+
+    enc = encoding.lower()
+    if enc == "rgb8":
+        img = np.frombuffer(raw, dtype=np.uint8).reshape((height, width, 3))
+    elif enc == "rgba8":
+        img = np.frombuffer(raw, dtype=np.uint8).reshape((height, width, 4))
+    elif enc in ("mono8", "8uc1"):
+        img = np.frombuffer(raw, dtype=np.uint8).reshape((height, width))
+    elif enc == "32fc1":
+        img = np.frombuffer(raw, dtype=np.float32).reshape((height, width))
+    elif enc == "32sc1":
+        img = np.frombuffer(raw, dtype=np.int32).reshape((height, width))
+    else:
+        # Unknown encoding: return raw bytes reshaped best-effort as mono8.
+        img = np.frombuffer(raw, dtype=np.uint8)
+
+    return sec, nanosec, frame_id, encoding, img
+
+
 def deserialize_tf_message(data: bytes):
     """Deserializes tf2_msgs/msg/TFMessage from ROS 2 CDR format."""
     ptr = 4
@@ -378,8 +455,8 @@ def log_coordinate_axes(entity_path, length=0.3, radius=0.01):
 
 def main():
     print("==================================================")
-    print("1. config.yaml 설정 불러오기...")
-    with open("config.yaml", "r") as f:
+    print("1. config_stream.yaml 설정 불러오기...")
+    with open("config_stream.yaml", "r") as f:
         config = yaml.safe_load(f)
         
     mcap_path = None
@@ -412,7 +489,7 @@ def main():
             log_time_sec = log_time_ns / 1e9
             
             # Set current timeline time
-            rr.set_time_seconds("sim_time", log_time_sec)
+            rr.set_time("sim_time", duration=log_time_sec)
             
             if topic == "/map_3d":
                 markers = deserialize_marker_array(data)
@@ -466,10 +543,25 @@ def main():
             elif topic == "/lidar":
                 # Decode and log LiDAR point cloud in sensor local frame
                 _, _, _, lidar_pts = deserialize_point_cloud2(data)
-                
+
                 # Log Points under world/robot/lidar entity so Rerun transforms it automatically
                 rr.log("world/robot/lidar/points", rr.Points3D(lidar_pts, colors=[0, 255, 255], radii=0.025))
-                
+
+            elif schema is not None and schema.name == "sensor_msgs/msg/Image":
+                # Camera images (RGB / depth / semantic). Logged to a 2D entity
+                # path derived from the topic, branching on the ROS encoding.
+                _, _, _, encoding, img = deserialize_image(data)
+                entity_path = "cameras" + topic  # e.g. /camera/rgb -> cameras/camera/rgb
+                enc = encoding.lower()
+                if enc in ("rgb8", "rgba8", "mono8"):
+                    rr.log(entity_path, rr.Image(img))
+                elif enc == "32fc1":
+                    # Depth in metres. Invalid (no-hit) pixels are 0.
+                    rr.log(entity_path, rr.DepthImage(img, meter=1.0))
+                elif enc == "32sc1":
+                    # Semantic instance/object ids -> segmentation classes.
+                    rr.log(entity_path, rr.SegmentationImage(img.astype(np.uint16)))
+
     print("==================================================")
     print("Rerun 시각화 로깅 성공! Rerun Viewer가 실행되었습니다.")
     print("==================================================")

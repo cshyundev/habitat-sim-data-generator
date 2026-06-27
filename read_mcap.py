@@ -4,8 +4,8 @@ from mcap.reader import make_reader
 
 def main():
     print("==================================================")
-    print("1. config.yaml 설정 불러오기...")
-    with open("config.yaml", "r") as f:
+    print("1. config_stream.yaml 설정 불러오기...")
+    with open("config_stream.yaml", "r") as f:
         config = yaml.safe_load(f)
         
     mcap_path = os.path.join(config["output_dir"], config["output_filename"])

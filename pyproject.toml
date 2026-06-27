@@ -17,4 +17,9 @@ dependencies = [
     "trimesh>=4.0.0",
     "pillow>=10.0.0",
     "matplotlib>=3.10.9",
+    "habitat-sim",
+    "scipy>=1.15.3",
 ]
+
+[tool.uv.sources]
+habitat-sim = { path = "habitat-sim" }

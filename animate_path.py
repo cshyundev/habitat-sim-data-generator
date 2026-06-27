@@ -1,7 +1,7 @@
 """
 2D occupancy-grid path animation (live).
 
-Loads the simulator (like generate_data.py), converts it to a 2D occupancy
+Loads the simulator (from config_stream.yaml), converts it to a 2D occupancy
 grid, plans a path, and shows a circular mobile-robot agent driving along that
 path -- rendered live in a window (no file needed). The goal is a quick visual
 sanity check.
@@ -13,7 +13,7 @@ Design boundary (intentional):
              change; the only contract with the renderer is "List[Pose3D]".
 
 Usage:
-  uv run python animate_path.py                 # real sim from config.yaml
+  uv run python animate_path.py                 # real sim from config_stream.yaml
   uv run python animate_path.py --synthetic     # no sim; synthetic room grid
   uv run python animate_path.py --speed 4       # play 4x faster
   uv run python animate_path.py --save out.gif  # also write a GIF
@@ -177,7 +177,7 @@ def build_synthetic_occ(resolution: float = 0.05) -> OccupancyGrid2D:
 
 def main():
     parser = argparse.ArgumentParser(description="Live 2D occ-grid path animation.")
-    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--config", default="config_stream.yaml")
     parser.add_argument("--synthetic", action="store_true",
                         help="Skip the simulator; use a synthetic room grid.")
     parser.add_argument("--robot-radius", type=float, default=0.15, help="Robot radius [m].")
