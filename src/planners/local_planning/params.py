@@ -7,9 +7,7 @@ class DifferentialDriveParams:
     Configuration parameters for DifferentialDriveLocalPlanner.
 
     Velocity/acceleration limits drive the trapezoidal motion profiles for the
-    decoupled translate and rotate primitives (RTR). These replace the local
-    sampling parameters of ZigZagParams (linear_step / angular_step), which
-    only described constant-velocity sampling.
+    decoupled translate and rotate primitives (RTR).
     """
     linear_velocity: float           # max cruise linear speed [m/s]
     linear_acceleration: float       # max linear acceleration [m/s^2]

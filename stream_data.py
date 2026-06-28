@@ -17,6 +17,8 @@ from src.sensors.suite import SensorSuite
 from src.simulator.factory import create_simulator
 from src.pipeline.streaming import build_pipeline
 from src.pipeline.mcap_sink import McapSink
+from src.visualization.rerun_backend import RerunBackend
+from src.visualization.visualization_sink import VisualizationSink
 
 
 def parse_args():
@@ -35,16 +37,16 @@ def main():
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
-    print("1. 센서 스위트 초기화 중...")
+    print("1. Initialize Sensor...")
     sensor_suite = SensorSuite(config)
 
-    print(f"2. Habitat Simulator 초기화 중 (Scene: {config['scene_id']})...")
+    print(f"2. Initialize habitat simulator (Scene: {config['scene_id']})...")
     sim = create_simulator(config, sensor_suite)
 
     try:
-        print("3. 맵 생성 및 전역/지역 플래너 구성 중...")
+        print("3. Build Data Pipeline...")
         pipeline = build_pipeline(config, sim, sensor_suite)
-        print(f"   - 궤적 길이: {pipeline.duration_ns / 1e9:.2f}s")
+        print(f"   - length of trajectory: {pipeline.duration_ns / 1e9:.2f}s")
 
         sinks = []
         if not args.no_mcap:
@@ -52,23 +54,21 @@ def main():
             os.makedirs(output_dir, exist_ok=True)
             mcap_path = os.path.join(output_dir, config["output_filename"])
             sinks.append(McapSink(mcap_path, config))
-            print(f"   - MCAP 출력: {mcap_path}")
+            print(f"   - MCAP Output Path: {mcap_path}")
 
         if args.visualize:
             # Imported lazily so the data-only path needs no rerun install.
-            from src.visualization.rerun_backend import RerunBackend
-            from src.visualization.visualization_sink import VisualizationSink
             sinks.append(VisualizationSink(RerunBackend()))
-            print("   - 라이브 Rerun 시각화 활성화")
+            print("   - Live Rerun Visualiztion activated")
 
         if not sinks:
-            print("[경고] 활성화된 sink가 없습니다 (--no-mcap 이면서 --visualize 아님). 종료합니다.")
+            print("[WARN] There is no activated sink (--no-mcap nor --visualize). EXIT.")
             return
 
-        print("4. 스트리밍 캡처 시작...")
+        print("4. Run Pipeline...")
         event_count = pipeline.run(sinks)
         print("==================================================")
-        print(f"완료: 총 {event_count} 캡처 이벤트 처리.")
+        print(f"Complete: Total {event_count} Events.")
         print("==================================================")
 
     finally:

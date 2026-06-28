@@ -1,14 +1,11 @@
-import yaml
-import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 import habitat_sim
 
 from src.utils.tf import TFManager
 from src.datatypes.motion_state import MotionState
 from src.sensors.base_sensor import BaseSensor
-from src.sensors.lidar3d.ideal_lidar import IdealLiDAR3D
-from src.sensors.camera.camera import CameraSensor
-from src.sensors.imu.ideal_imu import IdealIMU
+from src.sensors.registry import get_sensor_class
+import src.sensors.builtin  # noqa: F401  (registers the built-in sensor types)
 
 _NS_PER_SEC = 1_000_000_000
 
@@ -34,67 +31,45 @@ class SensorSuite:
         # 2. Build Sensors
         self.sensors: List[BaseSensor] = []
         self._build_sensors(sensors_cfg)
-        
-        # 3. Track last capture timestamps for the legacy polling scheduler
-        #    (sensor_name -> timestamp_ns). Used by capture().
-        self.last_capture_times: Dict[str, Optional[int]] = {
-            sensor.name: None for sensor in self.sensors
-        }
 
-        # 4. Event-driven scheduler state (used by reset_schedule()/next_event()).
+        # 3. Event-driven scheduler state (used by reset_schedule()/next_event()).
         self._sched_counts: Dict[str, int] = {}
         self._sched_start_ns: int = 0
         self.reset_schedule(0)
 
     def _build_sensors(self, sensors_cfg: List[dict]):
-        """Instantiates sensor classes based on type configurations."""
+        """
+        Instantiates sensor classes from config "type" strings via the sensor
+        registry. New sensor types are added by decorating a BaseSensor
+        subclass with @register_sensor("type_name") -- this method never
+        needs to change.
+        """
         for s_cfg in sensors_cfg:
             name = s_cfg["name"]
             s_type = s_cfg["type"]
             parent_link = s_cfg["parent_link"]
             hz = s_cfg.get("hz", 10)
-            
+
             params = s_cfg.get("parameters", {})
             topic = params.get("topic", f"/{name}")
             schema = params.get("schema", "")
-            
-            if s_type == "lidar3d":
-                sensor = IdealLiDAR3D(
-                    name=name,
-                    sensor_type=s_type,
-                    parent_link=parent_link,
-                    hz=hz,
-                    topic=topic,
-                    schema=schema,
-                    parameters=params,
-                    tf_manager=self.tf_manager
-                )
-            elif s_type == "camera":
-                sensor = CameraSensor(
-                    name=name,
-                    sensor_type=s_type,
-                    parent_link=parent_link,
-                    hz=hz,
-                    topic=topic,
-                    schema=schema,
-                    parameters=params,
-                    tf_manager=self.tf_manager
-                )
-            elif s_type == "imu":
-                sensor = IdealIMU(
-                    name=name,
-                    sensor_type=s_type,
-                    parent_link=parent_link,
-                    hz=hz,
-                    topic=topic,
-                    schema=schema,
-                    parameters=params,
-                    tf_manager=self.tf_manager
-                )
-            else:
-                print(f"[SensorSuite] Warning: Unsupported sensor type '{s_type}' for sensor '{name}'. Skipping.")
+
+            try:
+                sensor_cls = get_sensor_class(s_type)
+            except KeyError as exc:
+                print(f"[SensorSuite] Warning: {exc} Skipping sensor '{name}'.")
                 continue
-                
+
+            sensor = sensor_cls(
+                name=name,
+                sensor_type=s_type,
+                parent_link=parent_link,
+                hz=hz,
+                topic=topic,
+                schema=schema,
+                parameters=params,
+                tf_manager=self.tf_manager
+            )
             self.sensors.append(sensor)
 
     def get_native_sensor_specs(self) -> List[habitat_sim.SensorSpec]:
@@ -175,69 +150,3 @@ class SensorSuite:
                 sim, motion_state, self.tf_manager
             )
         return observations
-
-    # ------------------------------------------------------------------
-    # Legacy polling capture (kept for the pose-list pipeline)
-    # ------------------------------------------------------------------
-    def capture(
-        self,
-        sim: habitat_sim.Simulator,
-        agent_state: habitat_sim.AgentState,
-        timestamp_ns: Optional[int]
-    ) -> Dict[str, Any]:
-        """
-        Triggers data capture from sensors whose capture period is satisfied.
-
-        Legacy polling interface (advances one external tick at a time). The
-        agent pose is wrapped into a velocity-free MotionState; this path is for
-        pose-only sensors (camera, lidar). For IMU-bearing pipelines use the
-        event-driven scheduler (reset_schedule/next_event/observe) with a
-        kinematic MotionState from the local planner.
-
-        Returns:
-            Dictionary mapping sensor_name -> observation data.
-        """
-        motion_state = self._agent_state_to_motion_state(agent_state, timestamp_ns or 0)
-
-        due: List[BaseSensor] = []
-        for sensor in self.sensors:
-            trigger = False
-
-            # If timestamp_ns is not specified (e.g. None), capture every step.
-            if timestamp_ns is None or timestamp_ns <= 0:
-                trigger = True
-            else:
-                period_ns = int(1e9 / sensor.hz)
-                last_time = self.last_capture_times[sensor.name]
-
-                if last_time is None:
-                    trigger = True
-                else:
-                    # 1ms tolerance to avoid float/int discretization issues.
-                    elapsed = timestamp_ns - last_time
-                    if elapsed >= (period_ns - 1000000):
-                        trigger = True
-
-            if trigger:
-                if timestamp_ns is not None:
-                    self.last_capture_times[sensor.name] = timestamp_ns
-                due.append(sensor)
-
-        return self.observe(due, sim, motion_state)
-
-    @staticmethod
-    def _agent_state_to_motion_state(
-        agent_state: habitat_sim.AgentState, timestamp_ns: int
-    ) -> MotionState:
-        """Wraps a habitat AgentState (pose only) into a velocity-free MotionState."""
-        rot = agent_state.rotation
-        orientation = np.array([rot.x, rot.y, rot.z, rot.w], dtype=np.float32)
-        zero3 = np.zeros(3, dtype=np.float32)
-        return MotionState(
-            position=np.asarray(agent_state.position, dtype=np.float32),
-            orientation=orientation,
-            timestamp_ns=int(timestamp_ns),
-            linear_velocity_body=zero3,
-            angular_velocity_body=zero3.copy(),
-            linear_acceleration_body=zero3.copy(),
-        )

@@ -94,6 +94,10 @@ class StreamingPipeline:
                 for sink in sinks:
                     sink.on_event(stream_event)
                 event_count += 1
+                
+                if event_count % 100 == 0:
+                    print(f"Event Count: {event_count} | current Time(s) {t / 10e9}")
+
         finally:
             for sink in sinks:
                 sink.on_finish()

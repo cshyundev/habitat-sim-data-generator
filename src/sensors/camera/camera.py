@@ -17,6 +17,7 @@ from src.sensors.camera.models import (
     EquirectangularCamera,
 )
 from src.sensors.camera.remap import transition_camera_view
+from src.sensors.registry import register_sensor
 
 
 # RGB camera models that habitat-sim can rasterize natively (no remap needed).
@@ -25,6 +26,7 @@ _HABITAT_NATIVE_RGB = {"pinhole", "equirectangular", "orthographic"}
 _PINHOLE_LIKE = {"pinhole", "perspective"}
 
 
+@register_sensor("camera")
 class CameraSensor(BaseSensor):
     """
     Camera sensor supporting arbitrary projection models for SLAM data generation.

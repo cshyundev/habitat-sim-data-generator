@@ -6,7 +6,9 @@ from typing import Any
 from src.sensors.lidar3d.base_lidar import LiDAR3D
 from src.datatypes.pose import Pose3D
 from src.datatypes.motion_state import MotionState
+from src.sensors.registry import register_sensor
 
+@register_sensor("lidar3d")
 class IdealLiDAR3D(LiDAR3D):
     """
     An ideal binned 3D LiDAR sensor simulating ray casting in a sphere configuration.

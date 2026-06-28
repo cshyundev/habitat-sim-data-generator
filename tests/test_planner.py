@@ -8,8 +8,26 @@ from typing import List
 
 from src.datatypes.pose import Pose3D
 from src.datatypes.map import OccupancyGrid2D, GRID_2D_FREE
-from src.planners.zigzag_planner import ZigZagPlanner
 from src.planners.map_converter import generate_occupancy_grid_from_ply, generate_occupancy_grid_from_sim
+from src.planners.global_planning import ZigzagCoveragePlanner
+from src.planners.local_planning import DifferentialDriveLocalPlanner, DifferentialDriveParams
+
+_DT_NS = 50_000_000  # 50ms trajectory sampling step for local-planner playback.
+
+
+def _plan_poses(occ_grid: OccupancyGrid2D, **global_kwargs) -> List[Pose3D]:
+    """Runs the global (coverage) -> local (differential drive) planner pipeline
+    and returns dense Pose3D samples, mirroring the old monolithic planner's output."""
+    global_planner = ZigzagCoveragePlanner()
+    waypoints = global_planner.plan_from_map(occ_grid, **global_kwargs)
+
+    local_params = DifferentialDriveParams(
+        linear_velocity=0.3, linear_acceleration=0.5,
+        angular_velocity=1.0, angular_acceleration=2.0,
+    )
+    local_planner = DifferentialDriveLocalPlanner(local_params)
+    local_planner.set_waypoints(waypoints)
+    return [state.pose for state in local_planner.sample_trajectory(_DT_NS)]
 
 class TestPlannerAndConverter(unittest.TestCase):
     def setUp(self):
@@ -59,30 +77,21 @@ class TestPlannerAndConverter(unittest.TestCase):
         self.assertTrue(os.path.exists(yaml_out))
         self.assertTrue(os.path.exists(png_out))
         
-        # Now run path planner from map
-        planner = ZigZagPlanner()
-        poses = planner.plan_from_map(
-            occ_grid=occ_map,
-            save_dir=self.output_dir,
-            map_name="ply_map",
+        # Now run the global -> local planner pipeline from the map
+        poses = _plan_poses(
+            occ_map,
             zigzag_spacing=0.5,
             wall_distance=0.3,
-            linear_step=0.2,
-            angular_step=15.0
         )
-        
+
         self.assertGreater(len(poses), 0)
-        
-        # Verify visualized path file exists
-        vis_path = os.path.join(self.output_dir, "ply_map_with_path.png")
-        self.assertTrue(os.path.exists(vis_path))
-        
+
         # Verify motion and path safety constraints for PLY trajectory
         self._verify_motion_constraints(poses)
         self._verify_path_safety(poses, occ_map)
 
     def test_simulator_zigzag_planner(self):
-        """Test BCD ZigZagPlanner using habitat-sim Simulator and check motion constraints."""
+        """Test BCD zigzag global+local planning using habitat-sim Simulator and check motion constraints."""
         if not os.path.exists(self.dataset_path):
             self.skipTest(f"Dataset config not found at {self.dataset_path}")
             
@@ -103,8 +112,7 @@ class TestPlannerAndConverter(unittest.TestCase):
             # 1. Generate map directly in test to access the occ_grid instance
             yaml_out = os.path.join(self.output_dir, "sim_map.yaml")
             png_out = os.path.join(self.output_dir, "sim_map.png")
-            vis_path = os.path.join(self.output_dir, "sim_map_with_path.png")
-            
+
             occ_grid = generate_occupancy_grid_from_sim(
                 sim=sim,
                 agent_height=1.6,
@@ -112,27 +120,21 @@ class TestPlannerAndConverter(unittest.TestCase):
                 obstacle_radius_m=0.3
             )
             occ_grid.save(yaml_out, png_out)
-            
-            # 2. Plan path from map
-            planner = ZigZagPlanner()
-            poses = planner.plan_from_map(
-                occ_grid=occ_grid,
-                save_dir=self.output_dir,
-                map_name="sim_map",
+
+            # 2. Plan path from map via the global -> local planner pipeline
+            poses = _plan_poses(
+                occ_grid,
                 zigzag_spacing=0.6,
                 wall_distance=0.3,
-                linear_step=0.25,
-                angular_step=10.0,
-                sweep_direction="horizontal"
+                sweep_direction="horizontal",
             )
-            
+
             # Verify we have generated poses
             self.assertGreater(len(poses), 0)
-            
+
             self.assertTrue(os.path.exists(yaml_out))
             self.assertTrue(os.path.exists(png_out))
-            self.assertTrue(os.path.exists(vis_path))
-            
+
             # Verify motion and path safety constraints for Simulator trajectory
             self._verify_motion_constraints(poses)
             self._verify_path_safety(poses, occ_grid)
@@ -150,8 +152,11 @@ class TestPlannerAndConverter(unittest.TestCase):
             # Shortest angular difference
             yaw_diff = abs(math.atan2(math.sin(p2.yaw - p1.yaw), math.cos(p2.yaw - p1.yaw)))
             
-            pos_changed = pos_diff > 1e-4
-            yaw_changed = yaw_diff > 1e-4
+            # Tolerance matches test_local_planner.test_rtr_one_motion_at_a_time:
+            # fixed-dt sampling of a continuous trapezoidal profile can straddle a
+            # rotate/translate boundary by a sub-mm/sub-mrad residual.
+            pos_changed = pos_diff > 1e-3
+            yaw_changed = yaw_diff > 1e-3
             
             # Both position and yaw cannot change simultaneously (except numerical noise)
             self.assertFalse(

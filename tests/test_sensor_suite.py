@@ -3,6 +3,9 @@ import numpy as np
 
 from src.utils.tf import TFManager
 from src.sensors.suite import SensorSuite
+from src.sensors.base_sensor import BaseSensor
+from src.sensors.registry import register_sensor, get_sensor_class, registered_sensor_types
+import src.sensors.builtin  # noqa: F401  (registers lidar3d/camera/imu)
 
 
 def _multi_rate_config():
@@ -124,6 +127,81 @@ class TestEventScheduler(unittest.TestCase):
             t, firing = suite.next_event()
             self.assertEqual(t, round(k * 1_000_000_000 / 3))
             self.assertEqual([s.name for s in firing], ["imu"])
+
+
+class _FakePluginSensor(BaseSensor):
+    """Minimal BaseSensor used to prove a new sensor type is pluggable
+    without editing SensorSuite or the registry module."""
+    def is_native(self):
+        return False
+
+    def get_sensor_spec(self):
+        return None
+
+    def get_observation(self, sim, motion_state, tf_manager):
+        return {self.name: "fake_observation"}
+
+
+class TestSensorRegistry(unittest.TestCase):
+    def test_builtin_types_registered(self):
+        for type_name in ("lidar3d", "camera", "imu"):
+            self.assertIn(type_name, registered_sensor_types())
+
+    def test_unknown_type_raises_with_available_list(self):
+        with self.assertRaises(KeyError) as ctx:
+            get_sensor_class("no_such_sensor_type")
+        self.assertIn("no_such_sensor_type", str(ctx.exception))
+        self.assertIn("lidar3d", str(ctx.exception))
+
+    def test_duplicate_registration_with_different_class_rejected(self):
+        with self.assertRaises(ValueError):
+            @register_sensor("imu")
+            class _ConflictingImu(BaseSensor):
+                def is_native(self):
+                    return False
+
+                def get_sensor_spec(self):
+                    return None
+
+                def get_observation(self, sim, motion_state, tf_manager):
+                    return {}
+
+    def test_new_sensor_type_pluggable_without_touching_suite(self):
+        """A third-party module registers its own type; SensorSuite picks it
+        up purely from config, with no SensorSuite/registry code changes."""
+        register_sensor("fake_plugin")(_FakePluginSensor)
+        self.assertIn("fake_plugin", registered_sensor_types())
+
+        config = {
+            "robot": {
+                "base_link": "base_link",
+                "links": [
+                    {"name": "base_link", "parent": None, "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
+                    {"name": "plugin_link", "parent": "base_link", "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
+                ],
+                "sensors": [
+                    {"name": "plugin_sensor", "type": "fake_plugin", "parent_link": "plugin_link", "hz": 1, "parameters": {}},
+                ],
+            }
+        }
+        suite = SensorSuite(config)
+        self.assertEqual(len(suite.sensors), 1)
+        self.assertIsInstance(suite.sensors[0], _FakePluginSensor)
+
+    def test_unsupported_sensor_type_is_skipped(self):
+        config = {
+            "robot": {
+                "base_link": "base_link",
+                "links": [
+                    {"name": "base_link", "parent": None, "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
+                ],
+                "sensors": [
+                    {"name": "mystery", "type": "bogus_type", "parent_link": "base_link", "hz": 1, "parameters": {}},
+                ],
+            }
+        }
+        suite = SensorSuite(config)
+        self.assertEqual(len(suite.sensors), 0)
 
 
 if __name__ == "__main__":

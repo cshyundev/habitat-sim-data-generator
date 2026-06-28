@@ -4,8 +4,10 @@ from typing import Any, Optional, Dict
 
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.motion_state import MotionState
+from src.sensors.registry import register_sensor
 
 
+@register_sensor("imu")
 class IdealIMU(BaseSensor):
     """
     Ideal 6-axis IMU (3-axis gyroscope + 3-axis accelerometer).
