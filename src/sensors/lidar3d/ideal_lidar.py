@@ -22,7 +22,8 @@ class IdealLiDAR3D(LiDAR3D):
         topic: str,
         schema: str,
         parameters: dict,
-        tf_manager: Any
+        tf_manager: Any,
+        raycaster: Any = None,
     ):
         """
         Initialize the Ideal 3D LiDAR sensor.
@@ -35,7 +36,8 @@ class IdealLiDAR3D(LiDAR3D):
             topic=topic,
             schema=schema,
             parameters=parameters,
-            tf_manager=tf_manager
+            tf_manager=tf_manager,
+            raycaster=raycaster,
         )
         self.azimuth_range = tuple(parameters.get("azimuth_range", (-180.0, 180.0)))
         self.altitude_range = tuple(parameters.get("altitude_range", (-15.0, 15.0)))
@@ -102,26 +104,20 @@ class IdealLiDAR3D(LiDAR3D):
         flat_directions_local = self.ray_directions.reshape(-1, 3)
         flat_directions_global = self._rotate_vectors(flat_directions_local, q_sensor_global_xyzw)
 
-        range_image = np.full((H, W), np.inf, dtype=np.float32)
-        semantic_image = np.zeros((H, W), dtype=np.uint32)
+        # Batched ray cast through the shared backend. Origins are the (single)
+        # sensor world position broadcast to every ray.
+        self.raycaster.bind(sim)  # idempotent; ensures the backend is ready
+        origins = np.broadcast_to(sensor_pos_global, flat_directions_global.shape)
+        res = self.raycaster.cast_rays(
+            origins,
+            flat_directions_global,
+            min_distance=self.min_distance,
+            max_distance=self.max_distance,
+        )
 
-        ray_origin = mn.Vector3(sensor_pos_global[0], sensor_pos_global[1], sensor_pos_global[2])
-
-        for i in range(H):
-            for j in range(W):
-                idx = i * W + j
-                dir_global = flat_directions_global[idx]
-                ray_dir = mn.Vector3(dir_global[0], dir_global[1], dir_global[2])
-                
-                ray = habitat_sim.geo.Ray(ray_origin, ray_dir)
-                results = sim.cast_ray(ray, max_distance=self.max_distance)
-                
-                if results.has_hits():
-                    hit = results.hits[0]
-                    dist = hit.ray_distance
-                    if dist >= self.min_distance:
-                        range_image[i, j] = dist
-                        semantic_image[i, j] = hit.object_id
+        # Misses keep +inf range / 0 semantic, matching the original convention.
+        range_image = res.distance.reshape(H, W).astype(np.float32)
+        semantic_image = res.object_id.reshape(H, W).astype(np.uint32)
 
         return {
             f"{self.uuid}_range": range_image,

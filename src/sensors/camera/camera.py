@@ -56,6 +56,7 @@ class CameraSensor(BaseSensor):
         schema: str,
         parameters: dict,
         tf_manager: Any,
+        raycaster: Any = None,
     ):
         super().__init__(
             name=name,
@@ -66,6 +67,7 @@ class CameraSensor(BaseSensor):
             schema=schema,
             parameters=parameters,
             tf_manager=tf_manager,
+            raycaster=raycaster,
         )
 
         self.modality = parameters.get("modality", "rgb").lower()
@@ -367,37 +369,28 @@ class CameraSensor(BaseSensor):
         # Rotate all local rays into the world frame at once.
         dirs_global = self._rotate_vectors(self._ray_dirs_local, q_sensor_global_xyzw)
 
-        ray_origin = mn.Vector3(
-            sensor_pos_global[0], sensor_pos_global[1], sensor_pos_global[2]
+        # Give invalid pixels (outside the model's valid FOV) a placeholder
+        # direction so the batch is well-defined; they are masked out below.
+        dirs = dirs_global.copy()
+        invalid = ~self._ray_valid
+        if np.any(invalid):
+            dirs[invalid] = (0.0, 0.0, -1.0)
+
+        self.raycaster.bind(sim)  # idempotent; ensures the backend is ready
+        origins = np.broadcast_to(sensor_pos_global, dirs.shape)
+        res = self.raycaster.cast_rays(
+            origins, dirs,
+            min_distance=self.min_distance,
+            max_distance=self.max_distance,
         )
 
-        is_depth = self.modality == "depth"
-        if is_depth:
-            out = np.zeros((H * W,), dtype=np.float32)
+        hit = res.hit & self._ray_valid
+        if self.modality == "depth":
+            dist = np.where(hit, res.distance, 0.0).astype(np.float32)
+            if self.depth_type == "planar":
+                dist = (dist * self._ray_cos).astype(np.float32)
+            out = dist
         else:
-            out = np.zeros((H * W,), dtype=np.uint32)
-
-        planar = self.depth_type == "planar"
-        for idx in range(H * W):
-            if not self._ray_valid[idx]:
-                continue
-            d = dirs_global[idx]
-            ray = habitat_sim.geo.Ray(
-                ray_origin, mn.Vector3(float(d[0]), float(d[1]), float(d[2]))
-            )
-            results = sim.cast_ray(ray, max_distance=self.max_distance)
-            if not results.has_hits():
-                continue
-            hit = results.hits[0]
-            dist = hit.ray_distance
-            if dist < self.min_distance:
-                continue
-            if is_depth:
-                if planar:
-                    out[idx] = dist * self._ray_cos[idx]
-                else:
-                    out[idx] = dist
-            else:
-                out[idx] = hit.object_id
+            out = np.where(hit, res.object_id, 0).astype(np.uint32)
 
         return {self.name: out.reshape(H, W)}

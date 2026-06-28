@@ -28,8 +28,11 @@ class IdealIMU(BaseSensor):
         topic: str,
         schema: str,
         parameters: dict,
-        tf_manager: Any
+        tf_manager: Any,
+        raycaster: Any = None,
     ):
+        # IMU does not ray-cast; ``raycaster`` is accepted only for a uniform
+        # sensor constructor signature.
         super().__init__(
             name=name,
             sensor_type=sensor_type,
@@ -38,7 +41,8 @@ class IdealIMU(BaseSensor):
             topic=topic,
             schema=schema,
             parameters=parameters,
-            tf_manager=tf_manager
+            tf_manager=tf_manager,
+            raycaster=raycaster,
         )
 
     def is_native(self) -> bool:

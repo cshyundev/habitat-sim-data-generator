@@ -10,6 +10,15 @@ output_filename: "trajectory_stream.mcap"
 # Optional safety cap on simulated trajectory length [s] (remove for full run).
 max_duration_sec: 100.0
 
+# Ray-casting backend for range/depth/semantic sensors (lidar, depth camera).
+#   backend: sim  -> habitat-sim sim.cast_ray loop (CPU, original behavior)
+#   backend: gpu  -> Apple Metal two-level BVH (MLX); much faster for large batches
+raycasting:
+  backend: sim          # sim | gpu
+  geometry: collision   # (gpu) collision = parity with cast_ray | visual = render mesh
+  dynamic: false        # (gpu) refresh moved-object transforms each frame
+  leaf_size: 8          # (gpu) BVH leaf size
+
 # Global coverage planner (coarse zigzag waypoints)
 planner:
   type: "zigzag"

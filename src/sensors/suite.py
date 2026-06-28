@@ -5,6 +5,7 @@ from src.utils.tf import TFManager
 from src.datatypes.motion_state import MotionState
 from src.sensors.base_sensor import BaseSensor
 from src.sensors.registry import get_sensor_class
+from src.raycasting.raycaster import RayCaster
 import src.sensors.builtin  # noqa: F401  (registers the built-in sensor types)
 
 _NS_PER_SEC = 1_000_000_000
@@ -27,12 +28,16 @@ class SensorSuite:
         
         # 1. Initialize TF Manager
         self.tf_manager = TFManager(links_cfg)
-        
-        # 2. Build Sensors
+
+        # 2. Shared ray-caster (selects its backend from config; sim default). One
+        #    instance is shared by every sensor so geometry is extracted/built once.
+        self.raycaster = RayCaster(config)
+
+        # 3. Build Sensors
         self.sensors: List[BaseSensor] = []
         self._build_sensors(sensors_cfg)
 
-        # 3. Event-driven scheduler state (used by reset_schedule()/next_event()).
+        # 4. Event-driven scheduler state (used by reset_schedule()/next_event()).
         self._sched_counts: Dict[str, int] = {}
         self._sched_start_ns: int = 0
         self.reset_schedule(0)
@@ -68,7 +73,8 @@ class SensorSuite:
                 topic=topic,
                 schema=schema,
                 parameters=params,
-                tf_manager=self.tf_manager
+                tf_manager=self.tf_manager,
+                raycaster=self.raycaster,
             )
             self.sensors.append(sensor)
 
@@ -144,6 +150,11 @@ class SensorSuite:
         The caller must have already applied ``motion_state.pose`` to the
         simulator's agent (native sensors render from the sim's current pose).
         """
+        # Prepare the shared ray-caster: build once (lazy), then refresh any moved
+        # geometry. Done here (once per capture) rather than per sensor.
+        self.raycaster.bind(sim)
+        self.raycaster.sync(sim)
+
         observations: Dict[str, Any] = {}
         for sensor in sensors:
             observations[sensor.name] = sensor.get_observation(

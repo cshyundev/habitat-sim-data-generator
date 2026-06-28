@@ -21,7 +21,8 @@ class LiDAR3D(BaseSensor, abc.ABC):
         topic: str,
         schema: str,
         parameters: dict,
-        tf_manager: Any
+        tf_manager: Any,
+        raycaster: Any = None,
     ):
         """
         Initialize the base LiDAR sensor.
@@ -34,7 +35,8 @@ class LiDAR3D(BaseSensor, abc.ABC):
             topic=topic,
             schema=schema,
             parameters=parameters,
-            tf_manager=tf_manager
+            tf_manager=tf_manager,
+            raycaster=raycaster,
         )
         self.uuid = name
         
