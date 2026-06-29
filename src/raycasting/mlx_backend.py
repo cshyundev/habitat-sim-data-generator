@@ -41,7 +41,7 @@ except Exception as exc:  # pragma: no cover - environment dependent
 # Two-level traversal kernel body (Metal). thread_position_in_grid.x = ray index.
 _KERNEL_SOURCE = r"""
     uint rid = thread_position_in_grid.x;
-    uint N = nrays[0];
+    uint N = (uint)params[2];
     if (rid >= N) return;
 
     float min_d = params[0];
@@ -132,9 +132,39 @@ _KERNEL_SOURCE = r"""
         }
     }
 
+    // ---- Post-processing (was host numpy): emit final per-ray fields. ----
+    if (best_inst < 0) {
+        out_t[rid] = INFINITY;     // miss; host derives hit = isfinite(distance)
+        out_obj[rid] = 0;
+        out_sem[rid] = 0;
+        out_point[3*rid+0] = 0.0f; out_point[3*rid+1] = 0.0f; out_point[3*rid+2] = 0.0f;
+        out_normal[3*rid+0] = 0.0f; out_normal[3*rid+1] = 0.0f; out_normal[3*rid+2] = 0.0f;
+        out_incidence[rid] = 0.0f;
+        out_backface[rid] = 0;
+        return;
+    }
+
+    float3 p = o + best * d;
+    float3 ln = float3(face_normal[3*best_tri+0], face_normal[3*best_tri+1], face_normal[3*best_tri+2]);
+    int ro = best_inst * 9;  // row-major 3x3 world rotation: wn = R * ln
+    float3 wn;
+    wn.x = inst_rot[ro+0]*ln.x + inst_rot[ro+1]*ln.y + inst_rot[ro+2]*ln.z;
+    wn.y = inst_rot[ro+3]*ln.x + inst_rot[ro+4]*ln.y + inst_rot[ro+5]*ln.z;
+    wn.z = inst_rot[ro+6]*ln.x + inst_rot[ro+7]*ln.y + inst_rot[ro+8]*ln.z;
+    float nl = sqrt(dot(wn, wn));
+    wn = wn / (nl < 1e-12f ? 1e-12f : nl);
+    float ddn = dot(d, wn);
+    bool bf = ddn > 0.0f;
+    float3 on = bf ? -wn : wn;          // orient to face the incoming ray
+    float inc = acos(clamp(fabs(ddn), 0.0f, 1.0f));
+
     out_t[rid] = best;
-    out_inst[rid] = best_inst;
-    out_tri[rid] = best_tri;
+    out_obj[rid] = inst_ids[2*best_inst+0];
+    out_sem[rid] = inst_ids[2*best_inst+1];
+    out_point[3*rid+0] = p.x; out_point[3*rid+1] = p.y; out_point[3*rid+2] = p.z;
+    out_normal[3*rid+0] = on.x; out_normal[3*rid+1] = on.y; out_normal[3*rid+2] = on.z;
+    out_incidence[rid] = inc;
+    out_backface[rid] = bf ? 1 : 0;
 """
 
 _INPUT_NAMES = [
@@ -143,9 +173,13 @@ _INPUT_NAMES = [
     "blas_min", "blas_max", "blas_left", "blas_right", "blas_start", "blas_count",
     "v0", "e1", "e2",
     "inst_root", "inst_inv",
-    "params", "nrays",
+    "face_normal", "inst_rot", "inst_ids",
+    "params",
 ]
-_OUTPUT_NAMES = ["out_t", "out_inst", "out_tri"]
+_OUTPUT_NAMES = [
+    "out_t", "out_obj", "out_sem",
+    "out_point", "out_normal", "out_incidence", "out_backface",
+]
 
 
 def _require_mlx() -> None:
@@ -280,6 +314,7 @@ class MLXRaycaster(RaycastBackend):
         self._e1 = mx.array(np.concatenate(e1s).reshape(-1).astype(np.float32))
         self._e2 = mx.array(np.concatenate(e2s).reshape(-1).astype(np.float32))
         self._face_normal = np.concatenate(fns).astype(np.float32)  # host, global tri order
+        self._face_normal_mx = mx.array(self._face_normal.reshape(-1))
         self._num_triangles = tri_base
 
         # --- Per-instance tables. ---
@@ -288,6 +323,10 @@ class MLXRaycaster(RaycastBackend):
         )
         self._inst_obj = np.array([om.object_id for om in model.objects], dtype=np.int32)
         self._inst_sem = np.array([om.semantic_id for om in model.objects], dtype=np.int32)
+        # interleaved [object_id, semantic_id] per instance (one GPU buffer).
+        self._inst_ids_mx = mx.array(
+            np.stack([self._inst_obj, self._inst_sem], axis=1).reshape(-1)
+        )
         self._inst_local_min = np.stack([mesh_local_aabb[om.mesh_key][0] for om in model.objects])
         self._inst_local_max = np.stack([mesh_local_aabb[om.mesh_key][1] for om in model.objects])
 
@@ -295,9 +334,13 @@ class MLXRaycaster(RaycastBackend):
         self._inst_inv = np.stack([_rigid_inverse_rows(W) for W in self._world])  # (K,12)
         self._inst_rot = self._world[:, :3, :3].copy()  # (K,3,3) for normal transform
         self._inst_inv_mx = mx.array(self._inst_inv)
+        self._inst_rot_mx = mx.array(np.ascontiguousarray(self._inst_rot).reshape(-1))
 
         self._build_tlas()
-        mx.eval(self._blas_min, self._v0, self._inst_root, self._inst_inv_mx)
+        mx.eval(
+            self._blas_min, self._v0, self._inst_root, self._inst_inv_mx,
+            self._face_normal_mx, self._inst_rot_mx, self._inst_ids_mx,
+        )
         self._built = True
         return self
 
@@ -348,8 +391,9 @@ class MLXRaycaster(RaycastBackend):
             self._inst_inv[i] = _rigid_inverse_rows(W)
             self._inst_rot[i] = W[:3, :3]
         self._inst_inv_mx = mx.array(self._inst_inv)
+        self._inst_rot_mx = mx.array(np.ascontiguousarray(self._inst_rot).reshape(-1))
         self._build_tlas()  # small: rebuild over instance AABBs
-        mx.eval(self._inst_inv_mx)
+        mx.eval(self._inst_inv_mx, self._inst_rot_mx)
 
     # ------------------------------------------------------------------
     # Query
@@ -382,11 +426,12 @@ class MLXRaycaster(RaycastBackend):
         directions = directions / np.maximum(norm, 1e-12)
 
         max_d = float(max_distance) if np.isfinite(max_distance) else 1e30
-        params = mx.array(np.array([float(min_distance), max_d], dtype=np.float32))
-        nrays = mx.array(np.array([n], dtype=np.uint32))
+        # params packs [min_d, max_d, n] -- folding n in saves one GPU buffer
+        # (Metal caps at 31 buffers and this kernel is at the limit).
+        params = mx.array(np.array([float(min_distance), max_d, float(n)], dtype=np.float32))
         grid_x = ((n + self.threadgroup - 1) // self.threadgroup) * self.threadgroup
 
-        out_t, out_inst, out_tri = self._kernel(
+        out_t, out_obj, out_sem, out_point, out_normal, out_incidence, out_backface = self._kernel(
             inputs=[
                 mx.array(origins.reshape(-1)), mx.array(directions.reshape(-1)),
                 self._tlas_min, self._tlas_max, self._tlas_left, self._tlas_right,
@@ -395,46 +440,32 @@ class MLXRaycaster(RaycastBackend):
                 self._blas_start, self._blas_count,
                 self._v0, self._e1, self._e2,
                 self._inst_root, self._inst_inv_mx,
-                params, nrays,
+                self._face_normal_mx, self._inst_rot_mx, self._inst_ids_mx,
+                params,
             ],
             grid=(grid_x, 1, 1),
             threadgroup=(self.threadgroup, 1, 1),
-            output_shapes=[(n,), (n,), (n,)],
-            output_dtypes=[mx.float32, mx.int32, mx.int32],
+            output_shapes=[(n,), (n,), (n,), (n * 3,), (n * 3,), (n,), (n,)],
+            output_dtypes=[
+                mx.float32, mx.int32, mx.int32,
+                mx.float32, mx.float32, mx.float32, mx.int32,
+            ],
         )
-        mx.eval(out_t, out_inst, out_tri)
-        best_t = np.array(out_t)
-        best_inst = np.array(out_inst)
-        best_tri = np.array(out_tri)
+        mx.eval(out_t, out_obj, out_sem, out_point, out_normal, out_incidence, out_backface)
 
-        result = RaycastResult.empty(n)
-        hit = best_inst >= 0
-        if not np.any(hit):
-            return result
-
-        inst = best_inst[hit]
-        tri = best_tri[hit]
-        d_hit = directions[hit]
-        dist_hit = best_t[hit].astype(np.float32)
-        point_hit = origins[hit] + dist_hit[:, None] * d_hit
-
-        # Local face normal -> world via instance rotation, then orient to ray.
-        local_n = self._face_normal[tri]
-        world_n = np.einsum("kij,kj->ki", self._inst_rot[inst], local_n)
-        n_len = np.linalg.norm(world_n, axis=1, keepdims=True)
-        n_unit = world_n / np.maximum(n_len, 1e-12)
-        d_dot_n = np.sum(d_hit * n_unit, axis=1)
-        backface = d_dot_n > 0.0
-        oriented = np.where(backface[:, None], -n_unit, n_unit)
-        incidence = np.arccos(np.clip(np.abs(d_dot_n), 0.0, 1.0)).astype(np.float32)
-
-        result.hit[hit] = True
-        result.distance[hit] = dist_hit
-        result.object_id[hit] = self._inst_obj[inst]
-        result.semantic_id[hit] = self._inst_sem[inst]
-        result.point[hit] = point_hit.astype(np.float32)
-        result.normal[hit] = oriented.astype(np.float32)
-        result.incidence_angle[hit] = incidence
-        result.backface[hit] = backface
+        # Kernel emits final per-ray fields (miss = +inf distance / zeroed rest,
+        # matching RaycastResult.empty), so the host just copies them out -- no
+        # numpy normal/incidence/point math.
+        distance = np.array(out_t).astype(np.float32)
+        result = RaycastResult(
+            hit=np.isfinite(distance),
+            distance=distance,
+            object_id=np.array(out_obj).astype(np.int32),
+            point=np.array(out_point).reshape(n, 3).astype(np.float32),
+            normal=np.array(out_normal).reshape(n, 3).astype(np.float32),
+            semantic_id=np.array(out_sem).astype(np.int32),
+            incidence_angle=np.array(out_incidence).astype(np.float32),
+            backface=np.array(out_backface).astype(bool),
+        )
         result.apply_min_distance(min_distance)
         return result
