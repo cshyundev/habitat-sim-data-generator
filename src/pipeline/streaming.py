@@ -120,7 +120,6 @@ def build_pipeline(
     cov_params = ZigzagCoverageParams.from_config(config)
     occ_grid = generate_occupancy_grid_from_sim(
         sim=sim,
-        agent_height=cov_params.agent_height,
         resolution=cov_params.resolution,
         obstacle_radius_m=cov_params.wall_distance,
     )

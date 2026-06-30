@@ -5,6 +5,7 @@ from src.utils.tf import TFManager
 from src.datatypes.motion_state import MotionState
 from src.sensors.base_sensor import BaseSensor
 from src.sensors.registry import get_sensor_class
+from src.robot_config import RobotBundle, SensorSpec
 from src.raycasting.raycaster import RayCaster
 import src.sensors.builtin  # noqa: F401  (registers the built-in sensor types)
 
@@ -15,19 +16,18 @@ class SensorSuite:
     Manages the robot's sensor configuration, spatial frame transformations (TF),
     and schedules/triggers sensor data capture based on frequencies.
     """
-    def __init__(self, config: dict):
+    def __init__(self, robot: RobotBundle, config: dict):
         """
-        Initialize the SensorSuite using configuration dictionary.
-        
+        Initialize the SensorSuite from a loaded robot model and config.
+
         Args:
-            config: Full yaml configuration dict containing 'robot' section.
+            robot: Validated RobotBundle (from robot_config.load_robot) supplying
+                the link frame tree and sensor specs. The robot's body dimensions
+                live on the RobotBundle -- SensorSuite manages sensors/TF only.
+            config: Full yaml config dict (used for ray-caster backend selection).
         """
-        robot_cfg = config.get("robot", {})
-        links_cfg = robot_cfg.get("links", [])
-        sensors_cfg = robot_cfg.get("sensors", [])
-        
-        # 1. Initialize TF Manager
-        self.tf_manager = TFManager(links_cfg)
+        # 1. Initialize TF Manager from the URDF-derived frame tree.
+        self.tf_manager = TFManager(robot.frames)
 
         # 2. Shared ray-caster (selects its backend from config; sim default). One
         #    instance is shared by every sensor so geometry is extracted/built once.
@@ -35,44 +35,32 @@ class SensorSuite:
 
         # 3. Build Sensors
         self.sensors: List[BaseSensor] = []
-        self._build_sensors(sensors_cfg)
+        self._build_sensors(robot.sensors)
 
         # 4. Event-driven scheduler state (used by reset_schedule()/next_event()).
         self._sched_counts: Dict[str, int] = {}
         self._sched_start_ns: int = 0
         self.reset_schedule(0)
 
-    def _build_sensors(self, sensors_cfg: List[dict]):
+    def _build_sensors(self, specs: List[SensorSpec]):
         """
-        Instantiates sensor classes from config "type" strings via the sensor
+        Instantiates sensor classes from validated SensorSpecs via the sensor
         registry. New sensor types are added by decorating a BaseSensor
         subclass with @register_sensor("type_name") -- this method never
-        needs to change.
+        needs to change. All specs are pre-validated by load_robot (type is
+        registered, topic/schema present, parent_link resolves), so there is
+        nothing to default or skip here.
         """
-        for s_cfg in sensors_cfg:
-            name = s_cfg["name"]
-            s_type = s_cfg["type"]
-            parent_link = s_cfg["parent_link"]
-            hz = s_cfg.get("hz", 10)
-
-            params = s_cfg.get("parameters", {})
-            topic = params.get("topic", f"/{name}")
-            schema = params.get("schema", "")
-
-            try:
-                sensor_cls = get_sensor_class(s_type)
-            except KeyError as exc:
-                print(f"[SensorSuite] Warning: {exc} Skipping sensor '{name}'.")
-                continue
-
+        for spec in specs:
+            sensor_cls = get_sensor_class(spec.type)
             sensor = sensor_cls(
-                name=name,
-                sensor_type=s_type,
-                parent_link=parent_link,
-                hz=hz,
-                topic=topic,
-                schema=schema,
-                parameters=params,
+                name=spec.name,
+                sensor_type=spec.type,
+                parent_link=spec.parent_link,
+                hz=spec.hz,
+                topic=spec.topic,
+                schema=spec.schema,
+                parameters=spec.parameters,
                 tf_manager=self.tf_manager,
                 raycaster=self.raycaster,
             )

@@ -1,28 +1,57 @@
+import os
+import tempfile
 import unittest
+
 import numpy as np
+import yaml
 
 from src.utils.tf import TFManager
 from src.sensors.suite import SensorSuite
 from src.sensors.base_sensor import BaseSensor
 from src.sensors.registry import register_sensor, get_sensor_class, registered_sensor_types
+from src.robot_config import ConfigError, load_robot
 import src.sensors.builtin  # noqa: F401  (registers lidar3d/camera/imu)
 
 
-def _multi_rate_config():
+def _suite(cfg):
+    """Load the robot model once, then build the SensorSuite from it (new wiring)."""
+    return SensorSuite(load_robot(cfg), cfg)
+
+
+# --- helpers: build new-format configs (urdf null + mounts + sensors file) ----
+_TMP = tempfile.mkdtemp()
+_seq = [0]
+
+
+def _mount(name, xyz):
+    return {"name": name, "parent": "base_link", "xyz": xyz, "rpy": [0, 0, 0]}
+
+
+def _cfg(mounts, sensors):
+    _seq[0] += 1
+    path = os.path.join(_TMP, f"sensors_{_seq[0]}.yaml")
+    with open(path, "w") as f:
+        yaml.safe_dump({"sensors": sensors}, f)
     return {
         "robot": {
-            "base_link": "base_link",
-            "links": [
-                {"name": "base_link", "parent": None, "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
-                {"name": "lidar_link", "parent": "base_link", "position": [0.0, 0.3, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
-                {"name": "imu_link", "parent": "base_link", "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
-            ],
-            "sensors": [
-                {"name": "lidar_3d", "type": "lidar3d", "parent_link": "lidar_link", "hz": 10, "parameters": {}},
-                {"name": "imu", "type": "imu", "parent_link": "imu_link", "hz": 100, "parameters": {}},
-            ],
+            "urdf": None,
+            "sensors": path,
+            "body": {"height": 1.6, "radius": 0.15},
+            "mounts": mounts,
         }
     }
+
+
+def _multi_rate_config():
+    return _cfg(
+        [_mount("lidar_link", [0, 0, 0.3]), _mount("imu_link", [0, 0, 0])],
+        [
+            {"name": "lidar_3d", "type": "lidar3d", "parent_link": "lidar_link", "hz": 10,
+             "topic": "/lidar", "schema": "sensor_msgs/msg/PointCloud2", "parameters": {}},
+            {"name": "imu", "type": "imu", "parent_link": "imu_link", "hz": 100,
+             "topic": "/imu", "schema": "sensor_msgs/msg/Imu", "parameters": {}},
+        ],
+    )
 
 
 class TestTFManager(unittest.TestCase):
@@ -47,24 +76,19 @@ class TestTFManager(unittest.TestCase):
 
 class TestSensorSuiteInit(unittest.TestCase):
     def test_sensor_suite_init(self):
-        config = {
-            "robot": {
-                "base_link": "base_link",
-                "links": [
-                    {"name": "base_link", "parent": None, "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
-                    {"name": "lidar_link", "parent": "base_link", "position": [0.0, 0.3, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
-                    {"name": "camera_link", "parent": "base_link", "position": [0.0, 0.5, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
-                ],
-                "sensors": [
-                    {"name": "lidar_3d", "type": "lidar3d", "parent_link": "lidar_link", "hz": 10,
-                     "parameters": {"min_distance": 0.1, "max_distance": 30.0, "topic": "/lidar", "schema": "sensor_msgs/msg/PointCloud2"}},
-                    {"name": "camera_rgb", "type": "camera", "parent_link": "camera_link", "hz": 5,
-                     "parameters": {"modality": "rgb", "width": 640, "height": 480, "topic": "/camera/rgb", "schema": "sensor_msgs/msg/Image"}},
-                ],
-            }
-        }
+        config = _cfg(
+            [_mount("lidar_link", [0, 0, 0.3]), _mount("camera_link", [0, 0, 0.5])],
+            [
+                {"name": "lidar_3d", "type": "lidar3d", "parent_link": "lidar_link", "hz": 10,
+                 "topic": "/lidar", "schema": "sensor_msgs/msg/PointCloud2",
+                 "parameters": {"min_distance": 0.1, "max_distance": 30.0}},
+                {"name": "camera_rgb", "type": "camera", "parent_link": "camera_link", "hz": 5,
+                 "topic": "/camera/rgb", "schema": "sensor_msgs/msg/Image",
+                 "parameters": {"modality": "rgb", "width": 640, "height": 480}},
+            ],
+        )
 
-        suite = SensorSuite(config)
+        suite = _suite(config)
         self.assertEqual(len(suite.sensors), 2)
 
         lidar_sensor = next(s for s in suite.sensors if s.name == "lidar_3d")
@@ -78,7 +102,7 @@ class TestSensorSuiteInit(unittest.TestCase):
         self.assertEqual(specs[0].resolution, [480, 640])  # height, width order
 
     def test_sensor_suite_builds_imu(self):
-        suite = SensorSuite(_multi_rate_config())
+        suite = _suite(_multi_rate_config())
         imu = next(s for s in suite.sensors if s.name == "imu")
         self.assertEqual(imu.sensor_type, "imu")
         self.assertFalse(imu.is_native())
@@ -87,7 +111,7 @@ class TestSensorSuiteInit(unittest.TestCase):
 
 class TestEventScheduler(unittest.TestCase):
     def test_event_scheduler_multi_rate(self):
-        suite = SensorSuite(_multi_rate_config())
+        suite = _suite(_multi_rate_config())
         suite.reset_schedule(0)
 
         # 1. Both sensors fire together at t = 0.
@@ -108,19 +132,12 @@ class TestEventScheduler(unittest.TestCase):
 
     def test_event_scheduler_non_integer_period_no_drift(self):
         # 3 Hz -> period 1e9/3 ns is not an integer; ensure no accumulated drift.
-        config = {
-            "robot": {
-                "base_link": "base_link",
-                "links": [
-                    {"name": "base_link", "parent": None, "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
-                    {"name": "imu_link", "parent": "base_link", "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
-                ],
-                "sensors": [
-                    {"name": "imu", "type": "imu", "parent_link": "imu_link", "hz": 3, "parameters": {}},
-                ],
-            }
-        }
-        suite = SensorSuite(config)
+        config = _cfg(
+            [_mount("imu_link", [0, 0, 0])],
+            [{"name": "imu", "type": "imu", "parent_link": "imu_link", "hz": 3,
+              "topic": "/imu", "schema": "sensor_msgs/msg/Imu", "parameters": {}}],
+        )
+        suite = _suite(config)
         suite.reset_schedule(0)
 
         for k in range(0, 30):
@@ -172,36 +189,24 @@ class TestSensorRegistry(unittest.TestCase):
         register_sensor("fake_plugin")(_FakePluginSensor)
         self.assertIn("fake_plugin", registered_sensor_types())
 
-        config = {
-            "robot": {
-                "base_link": "base_link",
-                "links": [
-                    {"name": "base_link", "parent": None, "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
-                    {"name": "plugin_link", "parent": "base_link", "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
-                ],
-                "sensors": [
-                    {"name": "plugin_sensor", "type": "fake_plugin", "parent_link": "plugin_link", "hz": 1, "parameters": {}},
-                ],
-            }
-        }
-        suite = SensorSuite(config)
+        config = _cfg(
+            [_mount("plugin_link", [0, 0, 0])],
+            [{"name": "plugin_sensor", "type": "fake_plugin", "parent_link": "plugin_link", "hz": 1,
+              "topic": "/plugin", "schema": "std_msgs/msg/String", "parameters": {}}],
+        )
+        suite = _suite(config)
         self.assertEqual(len(suite.sensors), 1)
         self.assertIsInstance(suite.sensors[0], _FakePluginSensor)
 
-    def test_unsupported_sensor_type_is_skipped(self):
-        config = {
-            "robot": {
-                "base_link": "base_link",
-                "links": [
-                    {"name": "base_link", "parent": None, "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
-                ],
-                "sensors": [
-                    {"name": "mystery", "type": "bogus_type", "parent_link": "base_link", "hz": 1, "parameters": {}},
-                ],
-            }
-        }
-        suite = SensorSuite(config)
-        self.assertEqual(len(suite.sensors), 0)
+    def test_unsupported_sensor_type_raises(self):
+        # No silent skip: an unregistered type must fail loudly at load.
+        config = _cfg(
+            [_mount("lidar_link", [0, 0, 0.3])],
+            [{"name": "mystery", "type": "bogus_type", "parent_link": "lidar_link", "hz": 1,
+              "topic": "/mystery", "schema": "std_msgs/msg/String", "parameters": {}}],
+        )
+        with self.assertRaises(ConfigError):
+            _suite(config)
 
 
 if __name__ == "__main__":

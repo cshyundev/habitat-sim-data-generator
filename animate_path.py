@@ -144,16 +144,17 @@ def animate(occ_grid: OccupancyGrid2D, poses: List[Pose3D],
 # ==========================================================================
 def build_occ_from_sim(config: dict) -> OccupancyGrid2D:
     """Loads the simulator from config and converts it to an occupancy grid."""
+    from src.robot_config import load_robot
     from src.sensors.suite import SensorSuite
     from src.simulator.factory import create_simulator
 
     p_cfg = config.get("planner", {})
-    sensor_suite = SensorSuite(config)
-    sim = create_simulator(config, sensor_suite)
+    robot = load_robot(config)
+    sensor_suite = SensorSuite(robot, config)
+    sim = create_simulator(config, robot, sensor_suite)
     try:
         return generate_occupancy_grid_from_sim(
             sim=sim,
-            agent_height=p_cfg.get("agent_height", 1.6),
             resolution=p_cfg.get("resolution", 0.05),
             obstacle_radius_m=p_cfg.get("wall_distance", 0.3),
         )

@@ -26,7 +26,7 @@ planner:
   wall_distance: 0.3
   zigzag_spacing: 0.6
   sweep_direction: "horizontal"
-  agent_height: 1.6
+  # NOTE: robot height/radius now live in robot.body (single source), not here.
 
 # Local planner (differential-drive RTR, produces timed MotionState)
 local_planner:
@@ -38,69 +38,20 @@ local_planner:
 # Robot URDF-like Definition
 robot:
   base_link: "base_link"
-  links:
-    - name: "base_link"
-      parent: null
-      position: [0.0, 0.0, 0.0]
-      orientation: [0.0, 0.0, 0.0, 1.0]
-    - name: "lidar_link"
-      parent: "base_link"
-      position: [0.0, 0.3, 0.0]
-      orientation: [0.0, 0.0, 0.0, 1.0]
-    - name: "camera_link"
-      parent: "base_link"
-      position: [0.0, 0.5, 0.1]
-      orientation: [0.0, 0.0, 0.0, 1.0]
-    - name: "imu_link"
-      parent: "base_link"
-      position: [0.0, 0.0, 0.0]
-      orientation: [0.0, 0.0, 0.0, 1.0]
-  sensors:
-    - name: "lidar_3d"
-      type: "lidar3d"
-      parent_link: "lidar_link"
-      hz: 10
-      parameters:
-        lidar_type: "ideal"
-        min_distance: 0.1
-        max_distance: 30.0
-        azimuth_range: [-180.0, 180.0]
-        altitude_range: [-15.0, 15.0]
-        azimuth_bins: 360
-        altitude_bins: 16
-        topic: "/lidar"
-        schema: "sensor_msgs/msg/PointCloud2"
-    - name: "camera_rgb"
-      type: "camera"
-      parent_link: "camera_link"
-      hz: 10
-      parameters:
-        model: "pinhole"
-        modality: "rgb"
-        width: 640
-        height: 480
-        hfov: 90.0
-        topic: "/camera/rgb"
-        schema: "sensor_msgs/msg/Image"
-    - name: "camera_depth"
-      type: "camera"
-      parent_link: "camera_link"
-      hz: 10
-      parameters:
-        model: "pinhole"
-        modality: "depth"
-        width: 640
-        height: 480
-        hfov: 90.0
-        topic: "/camera/depth"
-        schema: "sensor_msgs/msg/Image"
-    - name: "imu"
-      type: "imu"
-      parent_link: "imu_link"
-      hz: 100
-      parameters:
-        topic: "/imu"
-        schema: "sensor_msgs/msg/Imu"
+  # Robot structure: a URDF file path, OR null -> runtime-generated from body+mounts.
+  urdf: null
+  # Sensor parameters (topic/schema/params), mapped to URDF links by parent_link name.
+  sensors: config/sensors.yaml
+  # Base collision body (cylinder): runtime-gen dims + navmesh source (single truth).
+  body:
+    height: 1.6   # m
+    radius: 0.15  # m
+  # Sensor mount frames for runtime URDF generation (URDF Z-up convention).
+  # Ignored when 'urdf' is set (a real URDF owns its own frames).
+  mounts:
+    - { name: lidar_link,  parent: base_link, xyz: [0.0, 0.0, 0.3], rpy: [0, 0, 0] }
+    - { name: camera_link, parent: base_link, xyz: [-0.1, 0.0, 0.5], rpy: [0, 0, 0] }
+    - { name: imu_link,    parent: base_link, xyz: [0.0, 0.0, 0.0], rpy: [0, 0, 0] }
 
 
 # MCAP Export configurations mapping data types to topics & schemas

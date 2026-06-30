@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<!-- Default cylinder robot. Convention: ROS REP-103 (Z-up, X-forward). -->
+<!-- Equivalent to src.robot.make_cylinder_robot(height=0.5, radius=0.25). -->
+<robot name="cylinder_robot">
+  <!-- Cylindrical body: base sits on the floor plane (z in [0, 0.5]). -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.25" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.25" length="0.5"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.25" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.25" length="0.5"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- 3D ideal LiDAR mounted at the top centre of the cylinder. -->
+  <link name="lidar_link"/>
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="0 0 0.5" rpy="0 0 0"/>
+  </joint>
+</robot>

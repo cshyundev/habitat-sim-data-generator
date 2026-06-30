@@ -39,6 +39,25 @@ def habitat_to_ros_quaternion(q: np.ndarray) -> np.ndarray:
     """
     return np.array([-q[2], -q[0], q[1], q[3]], dtype=q.dtype)
 
+def ros_to_habitat_position(p: np.ndarray) -> np.ndarray:
+    """
+    Converts a position from ROS/URDF coordinates to Habitat-sim. Inverse of
+    :func:`habitat_to_ros_position`.
+
+    ROS/URDF: Z-up, X-forward, Y-left  ->  Habitat: Y-up, -Z-forward, X-right
+        X_hab = -Y_ros,  Y_hab = Z_ros,  Z_hab = -X_ros
+    """
+    return np.array([-p[1], p[2], -p[0]], dtype=p.dtype)
+
+def ros_to_habitat_quaternion(q: np.ndarray) -> np.ndarray:
+    """
+    Converts a quaternion [x, y, z, w] from ROS/URDF to Habitat-sim. Inverse of
+    :func:`habitat_to_ros_quaternion`; the vector part transforms like a position
+    (the basis change is a proper rotation, so conjugating a rotation just
+    permutes the quaternion's vector part).
+    """
+    return np.array([-q[1], q[2], -q[0], q[3]], dtype=q.dtype)
+
 def habitat_to_ros_pointcloud(pc: np.ndarray) -> np.ndarray:
     """
     Converts an Nx3 pointcloud from Habitat-sim local/global coordinates

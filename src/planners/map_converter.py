@@ -132,6 +132,7 @@ def convert_3d_to_occupancy_grid(
 def generate_occupancy_grid_from_sim(
     sim: habitat_sim.Simulator,
     agent_height: Optional[float] = None,
+    agent_radius: Optional[float] = None,
     resolution: float = 0.05,
     obstacle_radius_m: Optional[float] = None
 ) -> OccupancyGrid2D:
@@ -139,16 +140,15 @@ def generate_occupancy_grid_from_sim(
     Recomputes Simulator's navmesh based on agent specifications, extracts the navmesh vertices,
     and returns a projected OccupancyGrid2D map.
     """
-    # 1. Query agent settings
-    agent_radius = 0.1
-    if agent_height is None:
-        try:
-            agent = sim.get_agent(0)
-            agent_height = agent.agent_config.height
-            agent_radius = agent.agent_config.radius
-        except Exception:
-            agent_height = 1.5  # default fallback
-            
+    # 1. Agent size — single source: the habitat agent, populated from config
+    # robot.body in src/simulator/factory.py. Explicit args override (e.g. tests).
+    if agent_height is None or agent_radius is None:
+        agent_cfg = sim.get_agent(0).agent_config
+        if agent_height is None:
+            agent_height = agent_cfg.height
+        if agent_radius is None:
+            agent_radius = agent_cfg.radius
+
     # Set default obstacle radius based on agent_radius if not provided
     if obstacle_radius_m is None:
         obstacle_radius_m = float(agent_radius) * 2.0

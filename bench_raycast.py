@@ -26,6 +26,7 @@ import yaml
 import magnum as mn
 import habitat_sim
 
+from src.robot_config import load_robot
 from src.sensors.suite import SensorSuite
 from src.simulator.factory import create_simulator
 from src.raycasting import extract_scene_model, read_dynamic_transforms, MLXRaycaster
@@ -75,20 +76,19 @@ SENSOR_DIRS = {"lidar": lidar_dirs, "laser": laser_dirs, "camera": camera_dirs}
 SENSOR_DEFAULT_TYPE = {"lidar": "lidar3d", "laser": "laser2d", "camera": "camera"}
 
 
-def find_sensor_params(config, sensor):
-    """Pull the matching sensor's parameter dict from the robot config, if any."""
-    for s in config.get("robot", {}).get("sensors", []):
-        st = s.get("type", "")
-        if sensor == "lidar" and st == "lidar3d":
-            return s["parameters"]
-        if sensor == "laser" and st == "laser2d":
-            return s["parameters"]
-        if sensor == "camera" and st == "camera" and s["parameters"].get("modality") in ("depth", "semantic"):
-            return s["parameters"]
+def find_sensor_params(specs, sensor):
+    """Pull the matching sensor's parameter dict from the loaded SensorSpecs, if any."""
+    for s in specs:
+        if sensor == "lidar" and s.type == "lidar3d":
+            return s.parameters
+        if sensor == "laser" and s.type == "laser2d":
+            return s.parameters
+        if sensor == "camera" and s.type == "camera" and s.parameters.get("modality") in ("depth", "semantic"):
+            return s.parameters
     if sensor == "camera":  # fall back to any camera entry
-        for s in config.get("robot", {}).get("sensors", []):
-            if s.get("type") == "camera":
-                return s["parameters"]
+        for s in specs:
+            if s.type == "camera":
+                return s.parameters
     return {}
 
 
@@ -259,12 +259,13 @@ def main():
 
     config = yaml.safe_load(open(args.config))
     rng = np.random.default_rng(args.seed)
-    params = find_sensor_params(config, args.sensor)
+    robot = load_robot(config)
+    params = find_sensor_params(robot.sensors, args.sensor)
     min_d = float(params.get("min_distance", 0.1))
     max_d = float(params.get("max_distance", 30.0))
 
     print(f"== bench: sensor={args.sensor} geometry={args.geometry} frames={args.frames} ==")
-    sim = create_simulator(config, SensorSuite(config))
+    sim = create_simulator(config, robot, SensorSuite(robot, config))
     try:
         # 1. Local ray directions for this sensor.
         dirs_local = SENSOR_DIRS[args.sensor](params).astype(np.float64)

@@ -99,7 +99,6 @@ class TestGlobalPlanner(unittest.TestCase):
                 "zigzag_spacing": 0.7,
                 "sweep_direction": "vertical",
                 "start_corner": "top_left",
-                "agent_height": 1.2,
             },
         }
         params = ZigzagCoverageParams.from_config(config)
@@ -108,7 +107,6 @@ class TestGlobalPlanner(unittest.TestCase):
         self.assertEqual(params.zigzag_spacing, 0.7)
         self.assertEqual(params.sweep_direction, "vertical")
         self.assertEqual(params.start_corner, "top_left")
-        self.assertEqual(params.agent_height, 1.2)
 
         d = params.to_dict()
         self.assertIn("zigzag_spacing", d)

@@ -1,15 +1,19 @@
 import habitat_sim
 from src.sensors.suite import SensorSuite
+from src.robot_config import RobotBundle
 
-def create_simulator(config: dict, sensor_suite: SensorSuite) -> habitat_sim.Simulator:
+def create_simulator(
+    config: dict, robot: RobotBundle, sensor_suite: SensorSuite
+) -> habitat_sim.Simulator:
     """
     Initializes and returns a habitat-sim Simulator instance, configuring
     scenes, physics settings, and embedding native sensor specifications.
-    
+
     Args:
         config: Full configuration dictionary.
-        sensor_suite: Instantiated SensorSuite containing native sensors configurations.
-        
+        robot: Validated RobotBundle supplying the body dimensions (agent capsule).
+        sensor_suite: Instantiated SensorSuite providing native sensor specs.
+
     Returns:
         habitat_sim.Simulator instance.
     """
@@ -22,9 +26,11 @@ def create_simulator(config: dict, sensor_suite: SensorSuite) -> habitat_sim.Sim
     sim_cfg.enable_physics = True
     sim_cfg.gpu_device_id = -1  # CPU mode
     
+    # Robot physical size is derived from the URDF body (the single structural
+    # source), owned by the robot model — not hardcoded, not the config/planner.
     agent_cfg = habitat_sim.agent.AgentConfiguration()
-    agent_cfg.height = config["planner"]["agent_height"]
-    agent_cfg.radius = 0.15
+    agent_cfg.height = float(robot.body_height)
+    agent_cfg.radius = float(robot.body_radius)
     agent_cfg.sensor_specifications = sensor_suite.get_native_sensor_specs()
     
     cfg = habitat_sim.Configuration(sim_cfg, [agent_cfg])

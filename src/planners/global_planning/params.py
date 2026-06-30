@@ -6,16 +6,16 @@ class ZigzagCoverageParams:
     """
     Configuration for ZigzagCoveragePlanner (ground mobile robot coverage).
 
-    These are ground/2D-grid-specific (resolution, wall_distance, agent_height,
-    ...) and intentionally live with this concrete planner, not in the
-    platform-general BaseGlobalPlanner.
+    These are ground/2D-grid-specific (resolution, wall_distance, ...) and
+    intentionally live with this concrete planner, not in the platform-general
+    BaseGlobalPlanner. Robot body size (height/radius) is NOT here — it comes
+    from the single config robot.body source via the habitat agent.
     """
     resolution: float = 0.05
     wall_distance: float = 0.3
     zigzag_spacing: float = 0.6
     sweep_direction: str = "horizontal"
     start_corner: str = "bottom_left"
-    agent_height: float = 1.6
 
     @classmethod
     def from_config(cls, config: dict) -> 'ZigzagCoverageParams':
@@ -27,7 +27,6 @@ class ZigzagCoverageParams:
             zigzag_spacing=p_cfg.get("zigzag_spacing", 0.6),
             sweep_direction=p_cfg.get("sweep_direction", "horizontal"),
             start_corner=p_cfg.get("start_corner", "bottom_left"),
-            agent_height=p_cfg.get("agent_height", 1.6),
         )
 
     def to_dict(self) -> dict:

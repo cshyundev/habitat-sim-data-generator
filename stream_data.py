@@ -13,6 +13,7 @@ import os
 import argparse
 import yaml
 
+from src.robot_config import load_robot
 from src.sensors.suite import SensorSuite
 from src.simulator.factory import create_simulator
 from src.pipeline.streaming import build_pipeline
@@ -38,10 +39,11 @@ def main():
         config = yaml.safe_load(f)
 
     print("1. Initialize Sensor...")
-    sensor_suite = SensorSuite(config)
+    robot = load_robot(config)
+    sensor_suite = SensorSuite(robot, config)
 
     print(f"2. Initialize habitat simulator (Scene: {config['scene_id']})...")
-    sim = create_simulator(config, sensor_suite)
+    sim = create_simulator(config, robot, sensor_suite)
 
     try:
         print("3. Build Data Pipeline...")
