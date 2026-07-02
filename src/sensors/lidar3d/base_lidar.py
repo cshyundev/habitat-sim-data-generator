@@ -72,11 +72,11 @@ class LiDAR3D(BaseSensor, abc.ABC):
     ) -> dict:
         """
         Generate sensor observations.
-        
+
         Returns:
             dict containing:
-                {name}_range: A 2D numpy array of shape (H, W) containing hit distance
-                {name}_semantic: A 2D numpy array of shape (H, W) containing hit object ID
+                {name}: A PointCloud (local sensor frame) built from the
+                    range/semantic ray-cast images.
         """
         pass
 

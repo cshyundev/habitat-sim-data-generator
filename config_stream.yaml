@@ -8,14 +8,14 @@ output_dir: "output_mcap"
 output_filename: "trajectory_stream.mcap"
 
 # Optional safety cap on simulated trajectory length [s] (remove for full run).
-max_duration_sec: 100.0
+max_duration_sec: 10.0  
 
 # Ray-casting backend for range/depth/semantic sensors (lidar, depth camera).
 #   backend: sim  -> habitat-sim sim.cast_ray loop (CPU, original behavior)
 #   backend: gpu  -> Apple Metal two-level BVH (MLX); much faster for large batches
 raycasting:
-  backend: sim          # sim | gpu
-  geometry: collision   # (gpu) collision = parity with cast_ray | visual = render mesh
+  backend: gpu          # sim | gpu
+  geometry: visual   # (gpu) collision = parity with cast_ray | visual = render mesh
   dynamic: false        # (gpu) refresh moved-object transforms each frame
   leaf_size: 8          # (gpu) BVH leaf size
 
@@ -53,6 +53,20 @@ robot:
     - { name: camera_link, parent: base_link, xyz: [-0.1, 0.0, 0.5], rpy: [0, 0, 0] }
     - { name: imu_link,    parent: base_link, xyz: [0.0, 0.0, 0.0], rpy: [0, 0, 0] }
 
+# Detections derived FROM a camera (not sensors). 2D and 3D are DECOUPLED:
+# each references a raycast-modality camera by name and is independently
+# enabled (omit a block to disable that product).
+detections:
+  bbox2d:
+    camera: camera_instance   # raycast (semantic/instance) camera in robot.sensors
+    min_box_px: 8             # drop boxes whose shorter side (px) is below this
+    topic: /det/bbox2d
+    schema: vision_msgs/msg/Detection2DArray
+  bbox3d:
+    camera: camera_instance
+    topic: /det/bbox3d
+    schema: vision_msgs/msg/Detection3DArray
+
 
 # MCAP Export configurations mapping data types to topics & schemas
 mcap_export:
@@ -63,6 +77,9 @@ mcap_export:
     point_cloud:
       topic: "/lidar"
       schema: "sensor_msgs/msg/PointCloud2"
+    laser_scan:
+      topic: "/laser"
+      schema: "sensor_msgs/msg/LaserScan"
     occupancy_grid:
       topic: "/map"
       schema: "nav_msgs/msg/OccupancyGrid"

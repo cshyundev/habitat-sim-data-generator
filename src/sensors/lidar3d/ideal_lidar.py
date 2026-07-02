@@ -6,6 +6,7 @@ from typing import Any
 from src.sensors.lidar3d.base_lidar import LiDAR3D
 from src.datatypes.pose import Pose3D
 from src.datatypes.motion_state import MotionState
+from src.datatypes.point_cloud import PointCloud
 from src.sensors.registry import register_sensor
 
 @register_sensor("lidar3d")
@@ -77,7 +78,11 @@ class IdealLiDAR3D(LiDAR3D):
         tf_manager: Any
     ) -> dict:
         """
-        Run spherical ray casting to generate range and semantic images.
+        Run spherical ray casting and return a local-frame PointCloud.
+
+        Returns:
+            ``{self.uuid: PointCloud}`` -- points already converted from the
+            range/semantic image via ``to_point_cloud(frame="local")``.
         """
         H, W = self.altitude_bins, self.azimuth_bins
 
@@ -119,8 +124,12 @@ class IdealLiDAR3D(LiDAR3D):
         range_image = res.distance.reshape(H, W).astype(np.float32)
         semantic_image = res.object_id.reshape(H, W).astype(np.uint32)
 
-        return {
-            f"{self.uuid}_range": range_image,
-            f"{self.uuid}_semantic": semantic_image
-        }
+        pc = self.to_point_cloud(range_image, semantic_image, frame="local")
+        cloud = PointCloud(
+            points=pc[:, :3],
+            semantic_ids=pc[:, 3].astype(np.uint32) if pc.shape[1] == 4 else None,
+            frame="local",
+            timestamp_ns=motion_state.timestamp_ns,
+        )
+        return {self.uuid: cloud}
 

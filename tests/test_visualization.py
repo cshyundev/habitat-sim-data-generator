@@ -3,6 +3,7 @@ import numpy as np
 
 from src.datatypes.pose import Pose3D
 from src.datatypes.motion_state import MotionState
+from src.datatypes.point_cloud import PointCloud
 from src.pipeline.sink import StreamContext, StreamEvent
 from src.visualization.backend import VisualizationBackend
 from src.visualization.visualization_sink import VisualizationSink, _normalize_vertex_colors
@@ -38,7 +39,7 @@ class FakeBackend(VisualizationBackend):
     def log_scalar(self, path, value):
         self.calls.append(("scalar", path, value))
 
-    def set_layout(self, spatial_origin="/world", scalar_view_origins=()):
+    def set_layout(self, spatial_origin="/world", scalar_view_origins=(), image_view_origins=()):
         self.calls.append(("layout", tuple(scalar_view_origins)))
 
     def close(self):
@@ -66,13 +67,8 @@ class _FakeSensor:
         self.parent_link = parent_link
 
 
-class _FakeLidar(_FakeSensor):
-    def __init__(self, name="lidar", points=None):
-        super().__init__(name, "lidar3d", "lidar_link")
-        self._points = points if points is not None else np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
-
-    def to_point_cloud(self, range_image):
-        return self._points
+def _fake_lidar(name="lidar"):
+    return _FakeSensor(name, "lidar3d", "lidar_link")
 
 
 def _motion_state():
@@ -142,7 +138,7 @@ class TestVisualizationSink(unittest.TestCase):
         }]
         ctx = StreamContext(
             config={}, occ_grid=None, scene_markers=markers,
-            tf_manager=_FakeTF(), sensors=[_FakeLidar(), _FakeSensor("imu", "imu", "imu_link")],
+            tf_manager=_FakeTF(), sensors=[_fake_lidar(), _FakeSensor("imu", "imu", "imu_link")],
         )
         sink.on_start(ctx)
 
@@ -158,7 +154,7 @@ class TestVisualizationSink(unittest.TestCase):
         sink = VisualizationSink(backend)
         ctx = StreamContext(config={}, occ_grid=None, scene_markers=[],
                             tf_manager=_FakeTF(),
-                            sensors=[_FakeLidar(), _FakeSensor("imu", "imu", "imu_link")])
+                            sensors=[_fake_lidar(), _FakeSensor("imu", "imu", "imu_link")])
         sink.on_start(ctx)
         layouts = [c[1] for c in backend.calls if c[0] == "layout"]
         self.assertEqual(layouts, [(sink.imu_path,)])  # one combined IMU window
@@ -167,7 +163,7 @@ class TestVisualizationSink(unittest.TestCase):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
         ctx = StreamContext(config={}, occ_grid=None, scene_markers=[],
-                            tf_manager=_FakeTF(), sensors=[_FakeLidar()])
+                            tf_manager=_FakeTF(), sensors=[_fake_lidar()])
         sink.on_start(ctx)
         layouts = [c[1] for c in backend.calls if c[0] == "layout"]
         self.assertEqual(layouts, [()])  # no IMU -> no scalar window
@@ -190,8 +186,8 @@ class TestVisualizationSink(unittest.TestCase):
     def test_lidar_event_logs_points(self):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
-        lidar = _FakeLidar()
-        obs = {"lidar": {"lidar_range": np.zeros((16, 360), dtype=np.float32)}}
+        lidar = _fake_lidar()
+        obs = {"lidar": PointCloud(points=np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32))}
         sink.on_event(_event([lidar], obs))
 
         self.assertEqual(backend.paths("points"), ["world/robot/lidar_link/points"])
@@ -217,8 +213,8 @@ class TestVisualizationSink(unittest.TestCase):
     def test_empty_lidar_pointcloud_logs_nothing(self):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
-        lidar = _FakeLidar(points=np.empty((0, 3), dtype=np.float32))
-        obs = {"lidar": {"lidar_range": np.zeros((16, 360), dtype=np.float32)}}
+        lidar = _fake_lidar()
+        obs = {"lidar": PointCloud(points=np.empty((0, 3), dtype=np.float32))}
         sink.on_event(_event([lidar], obs))
         self.assertEqual(backend.kinds().count("points"), 0)
 

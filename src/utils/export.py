@@ -1,9 +1,12 @@
 import os
 import struct
 import numpy as np
-from typing import Optional
+from typing import List, Optional
 from mcap.writer import Writer
 from src.datatypes.pose import Pose3D
+from src.datatypes.point_cloud import PointCloud
+from src.datatypes.laser_scan import LaserScan
+from src.datatypes.bbox import Detection2D, OBB3D
 
 # ==========================================
 # ROS 2 CDR Serialization Helpers
@@ -181,80 +184,103 @@ def serialize_marker_array(sec: int, nanosec: int, frame_id: str, markers_list: 
 
 def serialize_point_cloud2(
     sec: int, nanosec: int, frame_id: str,
-    points: np.ndarray  # shape (N, 3), float32
+    points: np.ndarray,  # shape (N, 3), float32
+    semantic_ids: Optional[np.ndarray] = None  # shape (N,), uint32
 ) -> bytes:
-    """Serializes sensor_msgs/msg/PointCloud2 to ROS 2 CDR format."""
+    """Serializes sensor_msgs/msg/PointCloud2 to ROS 2 CDR format.
+
+    When ``semantic_ids`` is provided, a 4th PointField ("semantic", UINT32)
+    is appended after x/y/z and ``point_step`` grows from 12 to 16 bytes.
+    When it is None the output is byte-identical to the original xyz-only
+    layout (existing lidar-without-semantics consumers are unaffected).
+    """
     data = bytearray([0x00, 0x01, 0x00, 0x00])
-    
+
     # 1. Header stamp: sec, nanosec
     data.extend(struct.pack("<iI", sec, nanosec))
-    
+
     # 2. Header frame_id: string
     frame_bytes = frame_id.encode('utf-8') + b'\x00'
     data.extend(struct.pack("<I", len(frame_bytes)))
     data.extend(frame_bytes)
-    
+
     # 3. height (1), width (N)
     # Align to 4 bytes
     offset = len(data) - 4
     remainder = offset % 4
     if remainder != 0:
         data.extend(b'\x00' * (4 - remainder))
-        
+
     num_points = len(points)
     data.extend(struct.pack("<II", 1, num_points))
-    
-    # 4. PointField[] fields: sequence of PointFields. Size = 3 ("x", "y", "z")
-    data.extend(struct.pack("<I", 3))
-    
-    fields = [("x", 0), ("y", 4), ("z", 8)]
-    for name, f_offset in fields:
+
+    # 4. PointField[] fields: sequence of PointFields.
+    has_semantic = semantic_ids is not None
+    fields = [("x", 0, 7), ("y", 4, 7), ("z", 8, 7)]  # 7: FLOAT32
+    if has_semantic:
+        fields.append(("semantic", 12, 6))  # 6: UINT32
+
+    data.extend(struct.pack("<I", len(fields)))
+
+    for name, f_offset, datatype in fields:
         name_bytes = name.encode('utf-8') + b'\x00'
-        
+
         # Align for string length (uint32)
         offset = len(data) - 4
         remainder = offset % 4
         if remainder != 0:
             data.extend(b'\x00' * (4 - remainder))
-            
+
         data.extend(struct.pack("<I", len(name_bytes)))
         data.extend(name_bytes)
-        
+
         # Align for offset (uint32), datatype (uint8), count (uint32)
         offset = len(data) - 4
         remainder = offset % 4
         if remainder != 0:
             data.extend(b'\x00' * (4 - remainder))
-        data.extend(struct.pack("<IBI", f_offset, 7, 1))  # 7: FLOAT32, count: 1
-        
+        data.extend(struct.pack("<IBI", f_offset, datatype, 1))
+
     # 5. is_bigendian (bool, 1 byte)
     data.append(0)
-    
+
     # Align for point_step (uint32)
     offset = len(data) - 4
     remainder = offset % 4
     if remainder != 0:
         data.extend(b'\x00' * (4 - remainder))
-        
-    point_step = 12  # x, y, z (3 * 4 bytes)
+
+    point_step = 16 if has_semantic else 12
     row_step = num_points * point_step
     data.extend(struct.pack("<II", point_step, row_step))
-    
+
     # 6. uint8[] data: sequence of bytes
-    raw_data = points.astype(np.float32).tobytes()
-    
+    if has_semantic:
+        structured = np.zeros(
+            num_points,
+            dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("sid", "<u4")],
+        )
+        pts = points.astype(np.float32)
+        structured["x"] = pts[:, 0]
+        structured["y"] = pts[:, 1]
+        structured["z"] = pts[:, 2]
+        structured["sid"] = np.asarray(semantic_ids, dtype=np.uint32)
+        raw_data = structured.tobytes()
+    else:
+        raw_data = points.astype(np.float32).tobytes()
+
     # Align for sequence size
     offset = len(data) - 4
     remainder = offset % 4
     if remainder != 0:
         data.extend(b'\x00' * (4 - remainder))
-        
+
     data.extend(struct.pack("<I", len(raw_data)))
     data.extend(raw_data)
-    
+
     # 7. is_dense (bool)
     data.append(1)
-    
+
     return bytes(data)
 
 
@@ -443,6 +469,190 @@ def serialize_imu(
     return bytes(data)
 
 
+def serialize_laser_scan(
+    sec: int, nanosec: int, frame_id: str,
+    angle_min: float, angle_max: float, angle_increment: float,
+    time_increment: float, scan_time: float,
+    range_min: float, range_max: float,
+    ranges: np.ndarray,  # shape (N,), float32
+    semantic_ids: Optional[np.ndarray] = None  # shape (N,), uint32
+) -> bytes:
+    """Serializes sensor_msgs/msg/LaserScan to ROS 2 CDR format.
+
+    ``intensities[]`` is repurposed to carry ``semantic_ids`` (cast to
+    float32) when provided, since LaserScan has no native semantic field;
+    it is written as an empty sequence when ``semantic_ids`` is None.
+    """
+    data = bytearray([0x00, 0x01, 0x00, 0x00])
+
+    # 1. Header stamp: sec, nanosec
+    data.extend(struct.pack("<iI", sec, nanosec))
+
+    # 2. Header frame_id: string
+    frame_bytes = frame_id.encode('utf-8') + b'\x00'
+    data.extend(struct.pack("<I", len(frame_bytes)))
+    data.extend(frame_bytes)
+
+    # 3. angle_min, angle_max, angle_increment, time_increment, scan_time,
+    #    range_min, range_max (7 x float32)
+    offset = len(data) - 4
+    remainder = offset % 4
+    if remainder != 0:
+        data.extend(b'\x00' * (4 - remainder))
+    data.extend(struct.pack(
+        "<fffffff",
+        angle_min, angle_max, angle_increment,
+        time_increment, scan_time,
+        range_min, range_max,
+    ))
+
+    # 4. ranges[]: float32 sequence
+    offset = len(data) - 4
+    remainder = offset % 4
+    if remainder != 0:
+        data.extend(b'\x00' * (4 - remainder))
+    ranges_f32 = np.asarray(ranges, dtype=np.float32)
+    data.extend(struct.pack("<I", len(ranges_f32)))
+    data.extend(ranges_f32.tobytes())
+
+    # 5. intensities[]: float32 sequence (carries semantic_ids when present)
+    offset = len(data) - 4
+    remainder = offset % 4
+    if remainder != 0:
+        data.extend(b'\x00' * (4 - remainder))
+    if semantic_ids is not None:
+        intensities = np.asarray(semantic_ids, dtype=np.float32)
+    else:
+        intensities = np.empty(0, dtype=np.float32)
+    data.extend(struct.pack("<I", len(intensities)))
+    data.extend(intensities.tobytes())
+
+    return bytes(data)
+
+
+def serialize_detection2d_array(
+    sec: int, nanosec: int, frame_id: str,
+    detections: List[Detection2D]
+) -> bytes:
+    """Serializes a list of Detection2D to a simplified Detection2DArray CDR
+    payload (instance_id, class_id, class_name, xyxy per detection).
+
+    Not a full ROS 2 vision_msgs/msg/Detection2DArray -- follows this
+    module's existing pragmatic hand-rolled-CDR convention, only round-trips
+    against the matching ``deserialize_detection2d_array``.
+    """
+    data = bytearray([0x00, 0x01, 0x00, 0x00])
+
+    # 1. Header stamp
+    data.extend(struct.pack("<iI", sec, nanosec))
+
+    # 2. Header frame_id: string
+    frame_bytes = frame_id.encode('utf-8') + b'\x00'
+    data.extend(struct.pack("<I", len(frame_bytes)))
+    data.extend(frame_bytes)
+
+    # 3. sequence size
+    offset = len(data) - 4
+    remainder = offset % 4
+    if remainder != 0:
+        data.extend(b'\x00' * (4 - remainder))
+    data.extend(struct.pack("<I", len(detections)))
+
+    for d in detections:
+        # instance_id, class_id (int32 x2)
+        offset = len(data) - 4
+        remainder = offset % 4
+        if remainder != 0:
+            data.extend(b'\x00' * (4 - remainder))
+        data.extend(struct.pack("<ii", int(d.instance_id), int(d.class_id)))
+
+        # class_name: string
+        name_bytes = d.class_name.encode('utf-8') + b'\x00'
+        offset = len(data) - 4
+        remainder = offset % 4
+        if remainder != 0:
+            data.extend(b'\x00' * (4 - remainder))
+        data.extend(struct.pack("<I", len(name_bytes)))
+        data.extend(name_bytes)
+
+        # xyxy (int32 x4)
+        offset = len(data) - 4
+        remainder = offset % 4
+        if remainder != 0:
+            data.extend(b'\x00' * (4 - remainder))
+        x1, y1, x2, y2 = d.xyxy
+        data.extend(struct.pack("<iiii", int(x1), int(y1), int(x2), int(y2)))
+
+    return bytes(data)
+
+
+def serialize_detection3d_array(
+    sec: int, nanosec: int, frame_id: str,
+    obbs: List[OBB3D]
+) -> bytes:
+    """Serializes a list of OBB3D to a simplified Detection3DArray CDR
+    payload (instance_id, class_id, class_name, center, half_extents,
+    quat_xyzw, frame per box). See ``serialize_detection2d_array`` docstring
+    for the "not full vision_msgs spec" caveat.
+    """
+    data = bytearray([0x00, 0x01, 0x00, 0x00])
+
+    # 1. Header stamp
+    data.extend(struct.pack("<iI", sec, nanosec))
+
+    # 2. Header frame_id: string
+    frame_bytes = frame_id.encode('utf-8') + b'\x00'
+    data.extend(struct.pack("<I", len(frame_bytes)))
+    data.extend(frame_bytes)
+
+    # 3. sequence size
+    offset = len(data) - 4
+    remainder = offset % 4
+    if remainder != 0:
+        data.extend(b'\x00' * (4 - remainder))
+    data.extend(struct.pack("<I", len(obbs)))
+
+    for o in obbs:
+        # instance_id, class_id (int32 x2)
+        offset = len(data) - 4
+        remainder = offset % 4
+        if remainder != 0:
+            data.extend(b'\x00' * (4 - remainder))
+        data.extend(struct.pack("<ii", int(o.instance_id), int(o.class_id)))
+
+        # class_name: string
+        name_bytes = o.class_name.encode('utf-8') + b'\x00'
+        offset = len(data) - 4
+        remainder = offset % 4
+        if remainder != 0:
+            data.extend(b'\x00' * (4 - remainder))
+        data.extend(struct.pack("<I", len(name_bytes)))
+        data.extend(name_bytes)
+
+        # center, half_extents (float64 x3 each), quat_xyzw (float64 x4)
+        offset = len(data) - 4
+        remainder = offset % 8
+        if remainder != 0:
+            data.extend(b'\x00' * (8 - remainder))
+        cx, cy, cz = (float(v) for v in o.center)
+        hx, hy, hz = (float(v) for v in o.half_extents)
+        qx, qy, qz, qw = (float(v) for v in o.quat_xyzw)
+        data.extend(struct.pack("<ddd", cx, cy, cz))
+        data.extend(struct.pack("<ddd", hx, hy, hz))
+        data.extend(struct.pack("<dddd", qx, qy, qz, qw))
+
+        # frame: string
+        frame_str_bytes = o.frame.encode('utf-8') + b'\x00'
+        offset = len(data) - 4
+        remainder = offset % 4
+        if remainder != 0:
+            data.extend(b'\x00' * (4 - remainder))
+        data.extend(struct.pack("<I", len(frame_str_bytes)))
+        data.extend(frame_str_bytes)
+
+    return bytes(data)
+
+
 # ==========================================
 # MCAP Exporter Implementation
 # ==========================================
@@ -527,13 +737,67 @@ class McapExporter:
 
     def write_point_cloud(
         self, timestamp_ns: int, frame_id: str,
-        points: np.ndarray
+        cloud: PointCloud
     ) -> None:
         """Writes PointCloud2 message."""
         sec = int(timestamp_ns // 1000000000)
         nanosec = int(timestamp_ns % 1000000000)
-        data = serialize_point_cloud2(sec, nanosec, frame_id, points)
+        data = serialize_point_cloud2(sec, nanosec, frame_id, cloud.points, cloud.semantic_ids)
         channel_id = self._get_channel_id("point_cloud")
+        self.writer.add_message(
+            channel_id=channel_id,
+            log_time=timestamp_ns,
+            data=data,
+            publish_time=timestamp_ns
+        )
+
+    def write_laser_scan(
+        self, timestamp_ns: int, frame_id: str,
+        scan: LaserScan
+    ) -> None:
+        """Writes LaserScan message."""
+        sec = int(timestamp_ns // 1000000000)
+        nanosec = int(timestamp_ns % 1000000000)
+        data = serialize_laser_scan(
+            sec, nanosec, frame_id,
+            scan.angle_min, scan.angle_max, scan.angle_increment,
+            scan.time_increment, scan.scan_time,
+            scan.range_min, scan.range_max,
+            scan.ranges, scan.semantic_ids,
+        )
+        channel_id = self._get_channel_id("laser_scan")
+        self.writer.add_message(
+            channel_id=channel_id,
+            log_time=timestamp_ns,
+            data=data,
+            publish_time=timestamp_ns
+        )
+
+    def write_detections2d(
+        self, timestamp_ns: int, frame_id: str, channel_key: str,
+        detections: List[Detection2D]
+    ) -> None:
+        """Writes a Detection2DArray-like message for a list of Detection2D."""
+        sec = int(timestamp_ns // 1000000000)
+        nanosec = int(timestamp_ns % 1000000000)
+        data = serialize_detection2d_array(sec, nanosec, frame_id, detections)
+        channel_id = self._get_channel_id(channel_key)
+        self.writer.add_message(
+            channel_id=channel_id,
+            log_time=timestamp_ns,
+            data=data,
+            publish_time=timestamp_ns
+        )
+
+    def write_detections3d(
+        self, timestamp_ns: int, frame_id: str, channel_key: str,
+        obbs: List[OBB3D]
+    ) -> None:
+        """Writes a Detection3DArray-like message for a list of OBB3D."""
+        sec = int(timestamp_ns // 1000000000)
+        nanosec = int(timestamp_ns % 1000000000)
+        data = serialize_detection3d_array(sec, nanosec, frame_id, obbs)
+        channel_id = self._get_channel_id(channel_key)
         self.writer.add_message(
             channel_id=channel_id,
             log_time=timestamp_ns,

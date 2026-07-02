@@ -7,7 +7,7 @@ the existing McapExporter and export_helper.
 """
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
 from src.utils.export import McapExporter
-from src.utils.coords import habitat_to_ros_pose, convert_occupancy_grid_to_ros
+from src.utils.coords import habitat_to_ros_pose, habitat_to_ros_obb, convert_occupancy_grid_to_ros
 from src.sensors.export_helper import export_sensor_data
 
 
@@ -18,6 +18,7 @@ class McapSink(StreamSink):
         self.mcap_path = mcap_path
         self.config = config
         self.exporter = None
+        self._rgb_parent_link = "camera_link"
 
     def on_start(self, ctx: StreamContext) -> None:
         self.exporter = McapExporter(self.mcap_path, self.config)
@@ -28,6 +29,25 @@ class McapSink(StreamSink):
             self.exporter.register_channel_dynamic(
                 key=sensor.name, topic=sensor.topic, schema_name=sensor.schema
             )
+
+        # Dynamic /det/bbox2d, /det/bbox3d channels -- decoupled per product,
+        # only registered when its config block is present (mirrors
+        # streaming.py::_build_detections).
+        det_cfg = self.config.get("detections", {})
+        if "bbox2d" in det_cfg:
+            b = det_cfg["bbox2d"]
+            self.exporter.register_channel_dynamic(
+                key="det_bbox2d", topic=b["topic"], schema_name=b["schema"]
+            )
+        if "bbox3d" in det_cfg:
+            b = det_cfg["bbox3d"]
+            self.exporter.register_channel_dynamic(
+                key="det_bbox3d", topic=b["topic"], schema_name=b["schema"]
+            )
+        self._rgb_parent_link = next(
+            (s.parent_link for s in ctx.sensors if getattr(s, "modality", None) == "rgb"),
+            "camera_link",
+        )
 
         # Latched 2D occupancy grid (/map).
         origin_pose_ros, ros_map_data = convert_occupancy_grid_to_ros(ctx.occ_grid)
@@ -68,6 +88,21 @@ class McapSink(StreamSink):
                     sensor=sensor,
                     observation=ev.observations[sensor.name],
                     timestamp_ns=ev.timestamp_ns,
+                )
+
+        if ev.detections:
+            boxes2d = ev.detections.get("bbox2d")
+            if boxes2d is not None and "det_bbox2d" in self.exporter.channels:
+                self.exporter.write_detections2d(
+                    timestamp_ns=ev.timestamp_ns, frame_id=self._rgb_parent_link,
+                    channel_key="det_bbox2d", detections=boxes2d,
+                )
+            bbox3d = ev.detections.get("bbox3d")
+            if bbox3d is not None and "det_bbox3d" in self.exporter.channels:
+                boxes3d_ros = [habitat_to_ros_obb(o) for o in bbox3d.get("world", [])]
+                self.exporter.write_detections3d(
+                    timestamp_ns=ev.timestamp_ns, frame_id="map",
+                    channel_key="det_bbox3d", obbs=boxes3d_ros,
                 )
 
     def on_finish(self) -> None:

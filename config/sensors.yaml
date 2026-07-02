@@ -43,6 +43,32 @@ sensors:
       height: 480
       hfov: 90.0
 
+  - name: camera_semantic
+    type: camera
+    parent_link: camera_link
+    hz: 10
+    topic: /camera/semantic
+    schema: sensor_msgs/msg/Image
+    parameters:
+      model: pinhole
+      modality: semantic
+      width: 640
+      height: 480
+      hfov: 90.0
+
+  - name: camera_instance
+    type: camera
+    parent_link: camera_link
+    hz: 10
+    topic: /camera/instance
+    schema: sensor_msgs/msg/Image
+    parameters:
+      model: pinhole
+      modality: instance
+      width: 640
+      height: 480
+      hfov: 90.0
+
   - name: imu
     type: imu
     parent_link: imu_link

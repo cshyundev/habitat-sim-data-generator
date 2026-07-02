@@ -48,14 +48,38 @@ class RaycastBackend(ABC):
 class SimRaycastBackend(RaycastBackend):
     """Reference backend: loops habitat-sim's ``sim.cast_ray`` (one ray at a time).
 
-    Reproduces the exact behavior sensors had before integration. ``semantic_id`` is
-    left at its sentinel (habitat's ``RayHitInfo`` exposes no semantic field)."""
+    Reproduces the exact behavior sensors had before integration, but also populates
+    ``semantic_id`` by query-mapping object IDs from the active simulator scene."""
 
     def __init__(self) -> None:
         self._sim = None
+        self._obj_id_to_sem_id = {}
 
     def bind(self, sim) -> None:
         self._sim = sim
+        self._obj_id_to_sem_id = {0: 0}  # stage_id (0) maps to semantic_id 0
+        if sim is not None:
+            # 1. Rigid objects
+            try:
+                rom = sim.get_rigid_object_manager()
+                for handle in rom.get_object_handles():
+                    o = rom.get_object_by_handle(handle)
+                    self._obj_id_to_sem_id[int(o.object_id)] = int(getattr(o, "semantic_id", 0))
+            except Exception:
+                pass
+
+            # 2. Articulated objects
+            try:
+                aom = sim.get_articulated_object_manager()
+                for handle in aom.get_object_handles():
+                    ao = aom.get_object_by_handle(handle)
+                    sem_id = int(getattr(ao, "semantic_id", 0))
+                    link_to_obj = dict(getattr(ao, "link_ids_to_object_ids", {}) or {})
+                    for oid in link_to_obj.values():
+                        self._obj_id_to_sem_id[int(oid)] = sem_id
+                    self._obj_id_to_sem_id[int(ao.object_id)] = sem_id
+            except Exception:
+                pass
 
     def cast_rays(self, origins, directions, min_distance=0.0, max_distance=float("inf")):
         if self._sim is None:
@@ -87,6 +111,7 @@ class SimRaycastBackend(RaycastBackend):
             result.hit[i] = True
             result.distance[i] = dist
             result.object_id[i] = hit.object_id
+            result.semantic_id[i] = self._obj_id_to_sem_id.get(int(hit.object_id), 0)
             p, nrm = hit.point, hit.normal
             result.point[i] = (float(p[0]), float(p[1]), float(p[2]))
             nv = np.array([float(nrm[0]), float(nrm[1]), float(nrm[2])])

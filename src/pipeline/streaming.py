@@ -14,12 +14,60 @@ from src.sensors.suite import SensorSuite
 from src.utils.habitat import pose_to_agent_state
 from src.utils.coords import extract_visual_map_as_markers
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
+from src.detections import BBox2DExtractor, BBox3DExtractor, build_category_names
+from src.raycasting import extract_scene_model
+from src.robot_config import ConfigError
 from src.planners.map_converter import generate_occupancy_grid_from_sim
 from src.planners.global_planning import ZigzagCoveragePlanner, ZigzagCoverageParams
 from src.planners.local_planning import (
     DifferentialDriveLocalPlanner,
     DifferentialDriveParams,
 )
+
+
+def _resolve_detection_camera(sensor_suite: SensorSuite, block: dict, key: str):
+    """Resolve + validate the raycast camera a detection product references."""
+    name = block.get("camera")
+    if not name:
+        raise ConfigError(f"detections.{key}.camera: required (raycast camera name).")
+    cam = next((s for s in sensor_suite.sensors if s.name == name), None)
+    if cam is None:
+        raise ConfigError(f"detections.{key}.camera '{name}' is not a configured sensor.")
+    if getattr(cam, "modality", None) not in ("instance", "semantic", "depth"):
+        raise ConfigError(
+            f"detections.{key}.camera '{name}' must be a raycast camera "
+            f"(modality instance/semantic/depth), got {getattr(cam, 'modality', None)!r}."
+        )
+    return cam
+
+
+def _build_detections(config: dict, sim, sensor_suite: SensorSuite):
+    """Build the (optional) DECOUPLED detection jobs from the `detections` config.
+
+    Returns a list of ``(key, extractor, camera)``; 2D and 3D are independent and
+    each present only when its config block is. Validates loudly.
+    """
+    det = config.get("detections")
+    if not det:
+        return []
+
+    sensor_suite.raycaster.bind(sim)
+    categories = build_category_names(sim)
+    jobs = []
+
+    if "bbox2d" in det:
+        b = det["bbox2d"]
+        cam = _resolve_detection_camera(sensor_suite, b, "bbox2d")
+        jobs.append(("bbox2d", BBox2DExtractor(cam, categories, int(b.get("min_box_px", 8))), cam))
+
+    if "bbox3d" in det:
+        b = det["bbox3d"]
+        cam = _resolve_detection_camera(sensor_suite, b, "bbox3d")
+        geometry = config.get("raycasting", {}).get("geometry", "visual")
+        scene_model = extract_scene_model(sim, geometry)
+        jobs.append(("bbox3d", BBox3DExtractor(cam, scene_model, categories), cam))
+
+    return jobs
 
 
 def _agent_start_pose(sim: habitat_sim.Simulator) -> Pose3D:
@@ -44,6 +92,7 @@ class StreamingPipeline:
         occ_grid,
         scene_markers: List[dict],
         duration_ns: int,
+        detectors=None,
     ):
         self.config = config
         self.sim = sim
@@ -52,6 +101,8 @@ class StreamingPipeline:
         self.occ_grid = occ_grid
         self.scene_markers = scene_markers
         self.duration_ns = duration_ns
+        # List of (key, extractor, camera); each runs when its camera fires.
+        self.detectors = detectors or []
 
     def run(self, sinks: List[StreamSink]) -> int:
         """
@@ -85,11 +136,20 @@ class StreamingPipeline:
                 self.sim.get_agent(0).set_state(pose_to_agent_state(motion_state.pose))
                 observations = self.sensor_suite.observe(firing, self.sim, motion_state)
 
+                # Camera-derived detections; each product runs only when its
+                # referenced camera fired this event (2D and 3D are independent).
+                detections = {}
+                for key, extractor, camera in self.detectors:
+                    if camera in firing:
+                        detections[key] = extractor.extract(self.sim, motion_state)
+                detections = detections or None
+
                 stream_event = StreamEvent(
                     timestamp_ns=t,
                     motion_state=motion_state,
                     observations=observations,
                     firing_sensors=firing,
+                    detections=detections,
                 )
                 for sink in sinks:
                     sink.on_event(stream_event)
@@ -144,6 +204,7 @@ def build_pipeline(
         duration_ns = min(duration_ns, int(float(max_duration_sec) * 1e9))
 
     scene_markers = extract_visual_map_as_markers(sim, config)
+    detectors = _build_detections(config, sim, sensor_suite)
 
     return StreamingPipeline(
         config=config,
@@ -153,4 +214,5 @@ def build_pipeline(
         occ_grid=occ_grid,
         scene_markers=scene_markers,
         duration_ns=duration_ns,
+        detectors=detectors,
     )

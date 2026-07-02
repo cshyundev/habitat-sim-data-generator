@@ -7,6 +7,7 @@ visualize_mcap_rerun.py, updated to the rerun 0.33 API:
   - scalars:   rr.Scalars(value)
 No recording file is saved (spawn=True viewer only).
 """
+import os
 from typing import Optional, Sequence
 
 import numpy as np
@@ -22,8 +23,12 @@ class RerunBackend(VisualizationBackend):
         self.timeline = timeline
 
     def start(self) -> None:
-        # spawn the viewer; do NOT save an .rrd file.
-        rr.init(self.app_id, spawn=True)
+        # Spawn the live viewer, unless RERUN_SAVE is set (then record to that
+        # .rrd path headlessly -- used for testing without a display).
+        save_path = os.environ.get("RERUN_SAVE")
+        rr.init(self.app_id, spawn=not save_path)
+        if save_path:
+            rr.save(save_path)
 
     def set_time(self, timestamp_ns: int) -> None:
         rr.set_time(self.timeline, duration=timestamp_ns / 1e9)
@@ -109,20 +114,56 @@ class RerunBackend(VisualizationBackend):
     def log_scalar(self, path: str, value: float) -> None:
         rr.log(path, rr.Scalars(value))
 
+    def log_boxes3d(self, path, centers, half_sizes, quats_xyzw, colors, labels) -> None:
+        if len(centers) == 0:
+            rr.log(path, rr.Clear(recursive=False))
+            return
+        rr.log(
+            path,
+            rr.Boxes3D(
+                centers=np.asarray(centers, dtype=np.float32),
+                half_sizes=np.asarray(half_sizes, dtype=np.float32),
+                quaternions=[rr.Quaternion(xyzw=np.asarray(q, dtype=np.float32)) for q in quats_xyzw],
+                colors=np.asarray(colors, dtype=np.uint8),
+                labels=list(labels),
+            ),
+        )
+
+    def log_image_boxes2d(self, path, image, boxes_xyxy, colors, labels) -> None:
+        rr.log(path, rr.Image(np.asarray(image)[..., :3]))
+        if len(boxes_xyxy) == 0:
+            rr.log(f"{path}/boxes", rr.Clear(recursive=False))
+            return
+        rr.log(
+            f"{path}/boxes",
+            rr.Boxes2D(
+                array=np.asarray(boxes_xyxy, dtype=np.float32),
+                array_format=rr.Box2DFormat.XYXY,
+                colors=np.asarray(colors, dtype=np.uint8),
+                labels=list(labels),
+            ),
+        )
+
     def set_layout(
         self,
         spatial_origin: str = "/world",
         scalar_view_origins: Sequence[str] = (),
+        image_view_origins: Sequence[str] = (),
     ) -> None:
-        # Each scalar origin becomes ONE time-series window grouping its child
-        # series (e.g. all 6 IMU channels in a single plot).
+        # 3D scene + one 2D image view per image origin (camera + its 2D boxes) +
+        # one time-series window per scalar origin (e.g. all 6 IMU channels).
         spatial = rrb.Spatial3DView(origin=spatial_origin, name="3D")
+        image_views = [
+            rrb.Spatial2DView(origin=origin, name=origin.strip("/").split("/")[-1] or "image")
+            for origin in image_view_origins
+        ]
         scalar_views = [
             rrb.TimeSeriesView(origin=origin, name=origin.strip("/") or "scalars")
             for origin in scalar_view_origins
         ]
-        if scalar_views:
-            blueprint = rrb.Blueprint(rrb.Horizontal(spatial, rrb.Vertical(*scalar_views)))
+        side = image_views + scalar_views
+        if side:
+            blueprint = rrb.Blueprint(rrb.Horizontal(spatial, rrb.Vertical(*side)))
         else:
             blueprint = rrb.Blueprint(spatial)
         rr.send_blueprint(blueprint)

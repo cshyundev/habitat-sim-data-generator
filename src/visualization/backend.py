@@ -88,10 +88,34 @@ class VisualizationBackend(ABC):
         """Log a single scalar sample to a time series at the given path."""
         raise NotImplementedError
 
+    def log_boxes3d(
+        self,
+        path: str,
+        centers: Sequence[Sequence[float]],
+        half_sizes: Sequence[Sequence[float]],
+        quats_xyzw: Sequence[Sequence[float]],
+        colors: Sequence[Sequence[int]],
+        labels: Sequence[str],
+    ) -> None:
+        """Log oriented 3D boxes (centers/half-sizes/quaternions). Default no-op."""
+        return None
+
+    def log_image_boxes2d(
+        self,
+        path: str,
+        image,
+        boxes_xyxy: Sequence[Sequence[float]],
+        colors: Sequence[Sequence[int]],
+        labels: Sequence[str],
+    ) -> None:
+        """Log an image with 2D boxes overlaid at the same entity path. Default no-op."""
+        return None
+
     def set_layout(
         self,
         spatial_origin: str = "/world",
         scalar_view_origins: Sequence[str] = (),
+        image_view_origins: Sequence[str] = (),
     ) -> None:
         """
         Optional layout hint: one spatial view rooted at ``spatial_origin`` plus

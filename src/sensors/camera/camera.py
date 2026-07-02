@@ -104,7 +104,7 @@ class CameraSensor(BaseSensor):
         self.needs_remap = False
         self.src_cam: Optional[EquirectangularCamera] = None
 
-        if self.modality in ("depth", "semantic"):
+        if self.modality in ("depth", "semantic", "instance"):
             self.cam = self._build_model()
             self._precompute_rays()
         elif self.modality == "rgb" and self.model not in _HABITAT_NATIVE_RGB:
@@ -263,7 +263,7 @@ class CameraSensor(BaseSensor):
     # ------------------------------------------------------------------
     def is_native(self) -> bool:
         # RGB is rasterized by habitat (directly or via an equirect render source).
-        # Depth/Semantic are ray-cast and therefore non-native.
+        # Depth/Semantic/Instance are ray-cast and therefore non-native.
         return self.modality == "rgb"
 
     def get_sensor_spec(self) -> Optional[habitat_sim.SensorSpec]:
@@ -307,7 +307,8 @@ class CameraSensor(BaseSensor):
         Returns ``{self.name: image}``:
         - RGB: rasterized image (native, or remapped from equirect).
         - Depth: float32 (H, W) planar z-depth or euclidean range.
-        - Semantic: (H, W) hit object_id.
+        - Semantic: (H, W) hit semantic_id (Class ID).
+        - Instance: (H, W) hit object_id (Instance ID).
         """
         if self.modality == "rgb":
             return self._observe_rgb(sim)
@@ -328,13 +329,13 @@ class CameraSensor(BaseSensor):
         return {self.name: remapped}
 
     # ------------------------------------------------------------------
-    # Depth / Semantic (ray casting)
+    # Ray casting (depth / semantic / instance, and reused by detections)
     # ------------------------------------------------------------------
-    def _observe_raycast(
-        self, sim: habitat_sim.Simulator, motion_state: MotionState
-    ) -> Dict[str, Any]:
-        H, W = self.height, self.width
+    def world_pose(self, motion_state: MotionState):
+        """This camera's world pose at ``motion_state`` -> (position xyz, quat xyzw).
 
+        position = agent_pos + R(agent) * mount_offset; orientation = R(agent) * R(offset).
+        """
         agent_pos = np.asarray(motion_state.position, dtype=np.float64)
         q_agent_xyzw = np.asarray(motion_state.orientation, dtype=np.float64)
         q_agent_mn = mn.Quaternion(
@@ -345,17 +346,11 @@ class CameraSensor(BaseSensor):
             ),
             float(q_agent_xyzw[3]),
         )
-
-        # Sensor world position = agent_pos + R(agent) * sensor_offset.
-        sensor_pos_local = np.array(
-            [self.position.x, self.position.y, self.position.z]
-        )
+        sensor_pos_local = np.array([self.position.x, self.position.y, self.position.z])
         sensor_pos_global = (
             agent_pos
             + self._rotate_vectors(sensor_pos_local[np.newaxis, :], q_agent_xyzw)[0]
         )
-
-        # Sensor world orientation = R(agent) * R(offset).
         q_sensor_global = q_agent_mn * self.orientation
         q_sensor_global_xyzw = np.array(
             [
@@ -365,13 +360,15 @@ class CameraSensor(BaseSensor):
                 q_sensor_global.scalar,
             ]
         )
+        return sensor_pos_global, q_sensor_global_xyzw
 
-        # Rotate all local rays into the world frame at once.
-        dirs_global = self._rotate_vectors(self._ray_dirs_local, q_sensor_global_xyzw)
+    def _cast(self, sim: habitat_sim.Simulator, motion_state: MotionState):
+        """Ray-cast the scene from this camera. Returns ``(RaycastResult, hit_mask[H*W])``."""
+        sensor_pos_global, q_sensor_global_xyzw = self.world_pose(motion_state)
 
-        # Give invalid pixels (outside the model's valid FOV) a placeholder
-        # direction so the batch is well-defined; they are masked out below.
-        dirs = dirs_global.copy()
+        # Rotate all local rays into the world frame; give invalid pixels (outside the
+        # model FOV) a placeholder direction so the batch is well-defined (masked out).
+        dirs = self._rotate_vectors(self._ray_dirs_local, q_sensor_global_xyzw).copy()
         invalid = ~self._ray_valid
         if np.any(invalid):
             dirs[invalid] = (0.0, 0.0, -1.0)
@@ -383,14 +380,31 @@ class CameraSensor(BaseSensor):
             min_distance=self.min_distance,
             max_distance=self.max_distance,
         )
+        return res, (res.hit & self._ray_valid)
 
-        hit = res.hit & self._ray_valid
+    def cast_ids(self, sim: habitat_sim.Simulator, motion_state: MotionState):
+        """One ray cast -> ``(object_id_map, semantic_id_map)``, both (H, W) uint32; 0 = no hit."""
+        res, hit = self._cast(sim, motion_state)
+        obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(self.height, self.width)
+        sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(self.height, self.width)
+        return obj, sem
+
+    def _observe_raycast(
+        self, sim: habitat_sim.Simulator, motion_state: MotionState
+    ) -> Dict[str, Any]:
+        H, W = self.height, self.width
+        res, hit = self._cast(sim, motion_state)
+
         if self.modality == "depth":
             dist = np.where(hit, res.distance, 0.0).astype(np.float32)
             if self.depth_type == "planar":
                 dist = (dist * self._ray_cos).astype(np.float32)
             out = dist
-        else:
+        elif self.modality == "semantic":
+            out = np.where(hit, res.semantic_id, 0).astype(np.uint32)
+        elif self.modality == "instance":
             out = np.where(hit, res.object_id, 0).astype(np.uint32)
+        else:
+            out = np.zeros(H * W, dtype=np.uint32)
 
         return {self.name: out.reshape(H, W)}

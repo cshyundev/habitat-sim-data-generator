@@ -3,6 +3,7 @@ from typing import Any
 
 from src.utils.export import McapExporter
 from src.sensors.base_sensor import BaseSensor
+from src.datatypes.point_cloud import PointCloud
 from src.utils.coords import habitat_to_ros_pointcloud, habitat_to_ros_position
 
 def export_sensor_data(
@@ -25,19 +26,17 @@ def export_sensor_data(
         return
         
     if sensor.sensor_type == "lidar3d":
-        range_key = f"{sensor.name}_range"
-        if range_key not in observation:
+        cloud = observation  # PointCloud, already in local sensor frame
+        if cloud is None or cloud.size == 0:
             return
-        range_image = observation[range_key]
-        
-        # Convert range image to point cloud coordinates
-        local_pc = sensor.to_point_cloud(range_image)
-        local_pc_ros = habitat_to_ros_pointcloud(local_pc).astype(np.float32)
-        
+
+        ros_points = habitat_to_ros_pointcloud(cloud.points).astype(np.float32)
+        ros_cloud = PointCloud(points=ros_points, semantic_ids=cloud.semantic_ids, frame="local")
+
         exporter.write_point_cloud(
             timestamp_ns=timestamp_ns,
             frame_id=sensor.parent_link,
-            points=local_pc_ros
+            cloud=ros_cloud
         )
         
     elif sensor.sensor_type == "imu":
@@ -92,7 +91,7 @@ def export_sensor_data(
                 image_data=img_data,
                 encoding="32FC1"
             )
-        elif modality == "semantic":
+        elif modality in ("semantic", "instance"):
             exporter.write_image(
                 timestamp_ns=timestamp_ns,
                 frame_id=sensor.parent_link,

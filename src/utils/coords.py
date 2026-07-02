@@ -1,6 +1,39 @@
 import numpy as np
+from scipy.spatial.transform import Rotation
 # pyrefly: ignore [missing-import]
 from src.datatypes.pose import Pose3D
+from src.datatypes.bbox import OBB3D
+
+# Habitat -> ROS basis change (X_ros=-Z_hab, Y_ros=-X_hab, Z_ros=Y_hab). Applied
+# on the LEFT to a box rotation so its axes (and directional half-extents) map
+# correctly; conjugation (as used for robot/sensor Pose3D orientation, whose
+# own local frame also follows the Habitat forward/up/right convention) would
+# mis-order an OBB's half-extents since a box's local axes are arbitrary
+# object geometry, not a Habitat-convention body frame.
+_R_HAB_TO_ROS = np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]], dtype=np.float64)
+
+
+def habitat_to_ros_obb(obb: OBB3D) -> OBB3D:
+    """
+    Converts a world-frame OBB3D from Habitat coordinates to ROS coordinates.
+
+    ``half_extents`` are intrinsic to the box's own local axes and are
+    unaffected by this world-frame change of basis; only ``center`` and
+    ``quat_xyzw`` change. Sets ``frame="map"`` on the result.
+    """
+    R_ros = _R_HAB_TO_ROS @ Rotation.from_quat(np.asarray(obb.quat_xyzw, dtype=np.float64)).as_matrix()
+    center_ros = _R_HAB_TO_ROS @ np.asarray(obb.center, dtype=np.float64)
+    quat_ros = Rotation.from_matrix(R_ros).as_quat()
+    return OBB3D(
+        instance_id=obb.instance_id,
+        class_id=obb.class_id,
+        class_name=obb.class_name,
+        center=center_ros.astype(np.float32),
+        half_extents=np.asarray(obb.half_extents, dtype=np.float32),
+        quat_xyzw=quat_ros.astype(np.float32),
+        frame="map",
+    )
+
 
 def habitat_to_ros_pose(pose: Pose3D) -> Pose3D:
     return Pose3D(

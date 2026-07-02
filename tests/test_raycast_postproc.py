@@ -179,5 +179,69 @@ class TestRaycastPostproc(unittest.TestCase):
         self._assert_matches(res, [self.T[0], T1b])
 
 
+class TestSimRaycastBackendMock(unittest.TestCase):
+    def test_semantic_id_populates_correctly_from_mock_sim(self):
+        from unittest.mock import MagicMock
+        from src.raycasting.backend import SimRaycastBackend
+        import magnum as mn
+
+        # 1. Mock Simulator & Managers
+        sim = MagicMock()
+        rom = MagicMock()
+        aom = MagicMock()
+
+        sim.get_rigid_object_manager.return_value = rom
+        sim.get_articulated_object_manager.return_value = aom
+
+        # Configure rigid objects
+        rigid_obj = MagicMock()
+        rigid_obj.object_id = 10
+        rigid_obj.semantic_id = 3
+        rom.get_object_handles.return_value = ["obj_10"]
+        rom.get_object_by_handle.return_value = rigid_obj
+
+        # Configure articulated objects
+        art_obj = MagicMock()
+        art_obj.object_id = 20
+        art_obj.semantic_id = 5
+        art_obj.link_ids_to_object_ids = {1: 21, 2: 22}
+        aom.get_object_handles.return_value = ["art_20"]
+        aom.get_object_by_handle.return_value = art_obj
+
+        # 2. Bind backend
+        backend = SimRaycastBackend()
+        backend.bind(sim)
+
+        # Assert mappings
+        self.assertEqual(backend._obj_id_to_sem_id.get(0), 0)     # stage
+        self.assertEqual(backend._obj_id_to_sem_id.get(10), 3)    # rigid
+        self.assertEqual(backend._obj_id_to_sem_id.get(20), 5)    # articulated base
+        self.assertEqual(backend._obj_id_to_sem_id.get(21), 5)    # link 1
+        self.assertEqual(backend._obj_id_to_sem_id.get(22), 5)    # link 2
+
+        # 3. Mock raycast hits
+        hit_info = MagicMock()
+        hit_info.ray_distance = 2.5
+        hit_info.object_id = 10  # rigid object hit
+        hit_info.point = mn.Vector3(0.0, 0.0, 2.5)
+        hit_info.normal = mn.Vector3(0.0, 0.0, -1.0)
+
+        ray_result = MagicMock()
+        ray_result.has_hits.return_value = True
+        ray_result.hits = [hit_info]
+
+        sim.cast_ray.return_value = ray_result
+
+        origins = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
+        directions = np.array([[0.0, 0.0, 1.0]], dtype=np.float64)
+
+        res = backend.cast_rays(origins, directions)
+
+        # Assert results
+        self.assertTrue(res.hit[0])
+        self.assertEqual(res.object_id[0], 10)
+        self.assertEqual(res.semantic_id[0], 3)
+
+
 if __name__ == "__main__":
     unittest.main()

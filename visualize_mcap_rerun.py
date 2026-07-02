@@ -86,7 +86,13 @@ def deserialize_occupancy_grid(data: bytes):
 
 
 def deserialize_point_cloud2(data: bytes):
-    """Deserializes sensor_msgs/msg/PointCloud2 from ROS 2 CDR format."""
+    """Deserializes sensor_msgs/msg/PointCloud2 from ROS 2 CDR format.
+
+    Mirrors ``serialize_point_cloud2`` in src/utils/export.py: branches on
+    ``point_step`` (12 -> legacy xyz-only layout, 16 -> xyz + uint32
+    semantic id). Returns a 5-tuple; ``semantic_ids`` is None for the legacy
+    layout.
+    """
     ptr = 4
     sec, nanosec = struct.unpack("<iI", data[ptr:ptr+8])
     ptr += 8
@@ -142,8 +148,17 @@ def deserialize_point_cloud2(data: bytes):
     ptr += 4
     
     raw_points_bytes = data[ptr:ptr+data_len]
-    points = np.frombuffer(raw_points_bytes, dtype=np.float32).reshape((-1, 3))
-    return sec, nanosec, frame_id, points
+    if point_step == 16:
+        structured = np.frombuffer(
+            raw_points_bytes,
+            dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("sid", "<u4")],
+        )
+        points = np.column_stack([structured["x"], structured["y"], structured["z"]]).astype(np.float32)
+        semantic_ids = structured["sid"].astype(np.uint32)
+    else:
+        points = np.frombuffer(raw_points_bytes, dtype=np.float32).reshape((-1, 3))
+        semantic_ids = None
+    return sec, nanosec, frame_id, points, semantic_ids
 
 
 def deserialize_marker_triangle_list(data: bytes):
@@ -436,6 +451,176 @@ def deserialize_tf_message(data: bytes):
     return sec, nanosec, frame_id, child_frame_id, tx, ty, tz, qx, qy, qz, qw
 
 
+def deserialize_laser_scan(data: bytes):
+    """Deserializes sensor_msgs/msg/LaserScan from ROS 2 CDR format.
+
+    Mirrors ``serialize_laser_scan`` in src/utils/export.py. ``semantic_ids``
+    (carried via the message's ``intensities`` field) is None when that
+    sequence is empty.
+    """
+    ptr = 4
+    sec, nanosec = struct.unpack("<iI", data[ptr:ptr+8])
+    ptr += 8
+
+    str_len = struct.unpack("<I", data[ptr:ptr+4])[0]
+    ptr += 4
+    frame_id = data[ptr:ptr+str_len-1].decode('utf-8')
+    ptr += str_len
+
+    offset = ptr - 4
+    rem = offset % 4
+    if rem != 0:
+        ptr += (4 - rem)
+    (angle_min, angle_max, angle_increment, time_increment, scan_time,
+     range_min, range_max) = struct.unpack("<fffffff", data[ptr:ptr+28])
+    ptr += 28
+
+    offset = ptr - 4
+    rem = offset % 4
+    if rem != 0:
+        ptr += (4 - rem)
+    ranges_len = struct.unpack("<I", data[ptr:ptr+4])[0]
+    ptr += 4
+    ranges = np.frombuffer(data[ptr:ptr+ranges_len*4], dtype=np.float32).copy()
+    ptr += ranges_len * 4
+
+    offset = ptr - 4
+    rem = offset % 4
+    if rem != 0:
+        ptr += (4 - rem)
+    intensities_len = struct.unpack("<I", data[ptr:ptr+4])[0]
+    ptr += 4
+    intensities = np.frombuffer(data[ptr:ptr+intensities_len*4], dtype=np.float32).copy()
+
+    semantic_ids = intensities.astype(np.uint32) if intensities_len > 0 else None
+
+    return (sec, nanosec, frame_id, angle_min, angle_max, angle_increment,
+            range_min, range_max, ranges, semantic_ids)
+
+
+def deserialize_detection2d_array(data: bytes):
+    """Deserializes the simplified Detection2DArray CDR payload written by
+    ``serialize_detection2d_array`` in src/utils/export.py.
+
+    Returns ``(sec, nanosec, frame_id, detections)`` where each detection is
+    a tuple ``(instance_id, class_id, class_name, x1, y1, x2, y2)``.
+    """
+    ptr = 4
+    sec, nanosec = struct.unpack("<iI", data[ptr:ptr+8])
+    ptr += 8
+
+    str_len = struct.unpack("<I", data[ptr:ptr+4])[0]
+    ptr += 4
+    frame_id = data[ptr:ptr+str_len-1].decode('utf-8')
+    ptr += str_len
+
+    offset = ptr - 4
+    rem = offset % 4
+    if rem != 0:
+        ptr += (4 - rem)
+    seq_len = struct.unpack("<I", data[ptr:ptr+4])[0]
+    ptr += 4
+
+    detections = []
+    for _ in range(seq_len):
+        offset = ptr - 4
+        rem = offset % 4
+        if rem != 0:
+            ptr += (4 - rem)
+        instance_id, class_id = struct.unpack("<ii", data[ptr:ptr+8])
+        ptr += 8
+
+        offset = ptr - 4
+        rem = offset % 4
+        if rem != 0:
+            ptr += (4 - rem)
+        name_len = struct.unpack("<I", data[ptr:ptr+4])[0]
+        ptr += 4
+        class_name = data[ptr:ptr+name_len-1].decode('utf-8')
+        ptr += name_len
+
+        offset = ptr - 4
+        rem = offset % 4
+        if rem != 0:
+            ptr += (4 - rem)
+        x1, y1, x2, y2 = struct.unpack("<iiii", data[ptr:ptr+16])
+        ptr += 16
+
+        detections.append((instance_id, class_id, class_name, x1, y1, x2, y2))
+
+    return sec, nanosec, frame_id, detections
+
+
+def deserialize_detection3d_array(data: bytes):
+    """Deserializes the simplified Detection3DArray CDR payload written by
+    ``serialize_detection3d_array`` in src/utils/export.py.
+
+    Returns ``(sec, nanosec, frame_id, obbs)`` where each obb is a tuple
+    ``(instance_id, class_id, class_name, center, half_extents, quat_xyzw, frame)``.
+    """
+    ptr = 4
+    sec, nanosec = struct.unpack("<iI", data[ptr:ptr+8])
+    ptr += 8
+
+    str_len = struct.unpack("<I", data[ptr:ptr+4])[0]
+    ptr += 4
+    frame_id = data[ptr:ptr+str_len-1].decode('utf-8')
+    ptr += str_len
+
+    offset = ptr - 4
+    rem = offset % 4
+    if rem != 0:
+        ptr += (4 - rem)
+    seq_len = struct.unpack("<I", data[ptr:ptr+4])[0]
+    ptr += 4
+
+    obbs = []
+    for _ in range(seq_len):
+        offset = ptr - 4
+        rem = offset % 4
+        if rem != 0:
+            ptr += (4 - rem)
+        instance_id, class_id = struct.unpack("<ii", data[ptr:ptr+8])
+        ptr += 8
+
+        offset = ptr - 4
+        rem = offset % 4
+        if rem != 0:
+            ptr += (4 - rem)
+        name_len = struct.unpack("<I", data[ptr:ptr+4])[0]
+        ptr += 4
+        class_name = data[ptr:ptr+name_len-1].decode('utf-8')
+        ptr += name_len
+
+        offset = ptr - 4
+        rem = offset % 8
+        if rem != 0:
+            ptr += (8 - rem)
+        cx, cy, cz = struct.unpack("<ddd", data[ptr:ptr+24])
+        ptr += 24
+        hx, hy, hz = struct.unpack("<ddd", data[ptr:ptr+24])
+        ptr += 24
+        qx, qy, qz, qw = struct.unpack("<dddd", data[ptr:ptr+32])
+        ptr += 32
+
+        offset = ptr - 4
+        rem = offset % 4
+        if rem != 0:
+            ptr += (4 - rem)
+        frame_str_len = struct.unpack("<I", data[ptr:ptr+4])[0]
+        ptr += 4
+        box_frame = data[ptr:ptr+frame_str_len-1].decode('utf-8')
+        ptr += frame_str_len
+
+        obbs.append((
+            instance_id, class_id, class_name,
+            np.array([cx, cy, cz]), np.array([hx, hy, hz]),
+            np.array([qx, qy, qz, qw]), box_frame,
+        ))
+
+    return sec, nanosec, frame_id, obbs
+
+
 # ==========================================
 # Main Visualization Logic
 # ==========================================
@@ -542,10 +727,53 @@ def main():
                 
             elif topic == "/lidar":
                 # Decode and log LiDAR point cloud in sensor local frame
-                _, _, _, lidar_pts = deserialize_point_cloud2(data)
+                _, _, _, lidar_pts, lidar_sem = deserialize_point_cloud2(data)
+
+                # Color by semantic id when present, else the default cyan.
+                if lidar_sem is not None and len(lidar_sem) > 0:
+                    colors = np.stack([
+                        (lidar_sem * 2654435761 % 256).astype(np.uint8),
+                        (lidar_sem * 40503 % 256).astype(np.uint8),
+                        (lidar_sem * 2246822519 % 256).astype(np.uint8),
+                    ], axis=-1)
+                else:
+                    colors = [0, 255, 255]
 
                 # Log Points under world/robot/lidar entity so Rerun transforms it automatically
-                rr.log("world/robot/lidar/points", rr.Points3D(lidar_pts, colors=[0, 255, 255], radii=0.025))
+                rr.log("world/robot/lidar/points", rr.Points3D(lidar_pts, colors=colors, radii=0.025))
+
+            elif topic == "/laser":
+                # Decode and log 2D laser scan as a flat point cloud.
+                (_, _, _, angle_min, angle_max, angle_increment,
+                 range_min, range_max, ranges, laser_sem) = deserialize_laser_scan(data)
+                angles = angle_min + np.arange(len(ranges)) * angle_increment
+                valid = np.isfinite(ranges) & (ranges >= range_min) & (ranges <= range_max)
+                xs = ranges[valid] * np.sin(angles[valid])
+                zs = -ranges[valid] * np.cos(angles[valid])
+                pts = np.column_stack([xs, np.zeros_like(xs), zs]).astype(np.float32)
+                rr.log("world/robot/laser/points", rr.Points3D(pts, colors=[255, 128, 0], radii=0.02))
+
+            elif topic == "/det/bbox2d":
+                _, _, det_frame_id, dets = deserialize_detection2d_array(data)
+                boxes = [[d[3], d[4], d[5], d[6]] for d in dets]
+                labels = [f"{d[0]}:{d[2]}" for d in dets]
+                entity_path = "cameras/" + det_frame_id
+                if boxes:
+                    rr.log(f"{entity_path}/detections2d", rr.Boxes2D(
+                        array=boxes, array_format=rr.Box2DFormat.XYXY, labels=labels
+                    ))
+
+            elif topic == "/det/bbox3d":
+                _, _, _, obbs = deserialize_detection3d_array(data)
+                if obbs:
+                    centers = [o[3] for o in obbs]
+                    half_sizes = [o[4] for o in obbs]
+                    quats = [rr.Quaternion(xyzw=o[5].astype(np.float32)) for o in obbs]
+                    labels = [f"{o[0]}:{o[2]}" for o in obbs]
+                    rr.log("world/detections3d", rr.Boxes3D(
+                        centers=centers, half_sizes=half_sizes,
+                        quaternions=quats, labels=labels,
+                    ))
 
             elif schema is not None and schema.name == "sensor_msgs/msg/Image":
                 # Camera images (RGB / depth / semantic). Logged to a 2D entity
@@ -559,7 +787,7 @@ def main():
                     # Depth in metres. Invalid (no-hit) pixels are 0.
                     rr.log(entity_path, rr.DepthImage(img, meter=1.0))
                 elif enc == "32sc1":
-                    # Semantic instance/object ids -> segmentation classes.
+                    # Semantic class IDs or instance/object IDs -> segmentation images.
                     rr.log(entity_path, rr.SegmentationImage(img.astype(np.uint16)))
 
     print("==================================================")

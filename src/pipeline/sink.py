@@ -31,6 +31,9 @@ class StreamEvent:
     motion_state: MotionState
     observations: Dict[str, Any]
     firing_sensors: List[BaseSensor]
+    # Camera-derived detections {"bbox2d", "bbox3d", "bbox3d_world"} when the
+    # referenced detections camera fired this event; None otherwise.
+    detections: Dict[str, Any] = None
 
 
 class StreamSink(ABC):

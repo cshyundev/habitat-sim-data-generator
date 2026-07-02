@@ -18,10 +18,17 @@ from src.utils.coords import (
     habitat_to_ros_pose,
     habitat_to_ros_pointcloud,
     habitat_to_ros_position,
+    habitat_to_ros_obb,
 )
 
 _LIDAR_COLOR = [0, 255, 255]
 _TRAJECTORY_COLOR = [0, 255, 0]
+
+
+def _class_color(class_id: int):
+    """Stable pseudo-random RGB color per semantic class id."""
+    rng = np.random.default_rng((int(class_id) * 2654435761) % (2 ** 32))
+    return [int(x) for x in rng.integers(60, 256, 3)]
 
 
 def _normalize_vertex_colors(colors, n_vertices: int):
@@ -61,6 +68,8 @@ class VisualizationSink(StreamSink):
         self.scene_path = scene_path
         self.trajectory_path = trajectory_path
         self.imu_path = imu_path
+        self.detections_path = "world/detections"
+        self._rgb_cam_name = None
         self._trajectory: list = []
         # sensor_type -> handler(self, sensor, observation)
         self._dispatch = {
@@ -79,7 +88,17 @@ class VisualizationSink(StreamSink):
         scalar_origins = []
         if any(s.sensor_type == "imu" for s in ctx.sensors):
             scalar_origins.append(self.imu_path)
-        self.backend.set_layout(spatial_origin="/world", scalar_view_origins=scalar_origins)
+        # RGB camera (if any) used to display 2D detection overlays -- gets its own
+        # 2D image view in the layout.
+        self._rgb_cam_name = next(
+            (s.name for s in ctx.sensors if getattr(s, "modality", None) == "rgb"), None
+        )
+        image_origins = [f"camera/{self._rgb_cam_name}"] if self._rgb_cam_name else []
+        self.backend.set_layout(
+            spatial_origin="/world",
+            scalar_view_origins=scalar_origins,
+            image_view_origins=image_origins,
+        )
 
         self.backend.log_axes(f"{self.robot_path}/axes", length=0.3)
 
@@ -137,20 +156,55 @@ class VisualizationSink(StreamSink):
                 continue  # unsupported sensor type -> silently skipped
             handler(self, sensor, observation)
 
+        if ev.detections:
+            self._log_detections(ev)
+
     def on_finish(self) -> None:
         self.backend.close()
+
+    # ------------------------------------------------------------------
+    # Detections (camera-derived 2D/3D boxes)
+    # ------------------------------------------------------------------
+    def _log_detections(self, ev: StreamEvent) -> None:
+        det = ev.detections
+
+        # 3D OBBs into the world scene (Habitat world -> ROS). The box rotation is
+        # mapped by R_HAB_TO_ROS on the left (not conjugated) so the directional
+        # half-extents stay aligned with their axes.
+        bbox3d = det.get("bbox3d")
+        if bbox3d is not None:
+            centers, halfs, quats, colors, labels = [], [], [], [], []
+            for o in bbox3d.get("world", []):
+                o_ros = habitat_to_ros_obb(o)
+                centers.append(o_ros.center)
+                halfs.append(o_ros.half_extents)
+                quats.append(o_ros.quat_xyzw)
+                colors.append(_class_color(o.class_id))
+                labels.append(f"{o.instance_id}:{o.class_name}")
+            self.backend.log_boxes3d(self.detections_path, centers, halfs, quats, colors, labels)
+
+        # 2D boxes overlaid on the RGB image, when the RGB camera fired this event.
+        # Each sensor observation is a dict {sensor_name: image}.
+        boxes2d = det.get("bbox2d")
+        obs = ev.observations.get(self._rgb_cam_name) if self._rgb_cam_name else None
+        img = obs.get(self._rgb_cam_name) if isinstance(obs, dict) else None
+        if boxes2d is not None and img is not None:
+            self.backend.log_image_boxes2d(
+                f"camera/{self._rgb_cam_name}",
+                img,
+                [list(d.xyxy) for d in boxes2d],
+                [_class_color(d.class_id) for d in boxes2d],
+                [f"{d.instance_id}:{d.class_name}" for d in boxes2d],
+            )
 
     # ------------------------------------------------------------------
     # Per-sensor-type handlers
     # ------------------------------------------------------------------
     def _log_lidar3d(self, sensor, observation) -> None:
-        range_key = f"{sensor.name}_range"
-        if range_key not in observation:
+        cloud = observation  # PointCloud
+        if cloud is None or cloud.size == 0:
             return
-        local_pc = sensor.to_point_cloud(observation[range_key])
-        if local_pc.shape[0] == 0:
-            return
-        ros_pc = habitat_to_ros_pointcloud(local_pc[:, :3]).astype(np.float32)
+        ros_pc = habitat_to_ros_pointcloud(cloud.points).astype(np.float32)
         self.backend.log_points(
             f"{self.robot_path}/{sensor.parent_link}/points",
             ros_pc,
