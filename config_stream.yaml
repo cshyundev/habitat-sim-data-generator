@@ -61,11 +61,13 @@ detections:
     camera: camera_instance   # raycast (semantic/instance) camera in robot.sensors
     min_box_px: 8             # drop boxes whose shorter side (px) is below this
     topic: /det/bbox2d
-    schema: vision_msgs/msg/Detection2DArray
+    # Not a real vision_msgs message (payload doesn't match); project-owned
+    # schema instead of borrowing a standard name it doesn't conform to.
+    schema: habitat_msgs/msg/Detection2DArray
   bbox3d:
     camera: camera_instance
     topic: /det/bbox3d
-    schema: vision_msgs/msg/Detection3DArray
+    schema: habitat_msgs/msg/Detection3DArray
 
 
 # MCAP Export configurations mapping data types to topics & schemas

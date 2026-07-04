@@ -40,9 +40,3 @@ class PointCloud:
     def size(self) -> int:
         """Number of points."""
         return self.points.shape[0]
-
-    def to_cdr_bytes(self, sec: int, nanosec: int, frame_id: str) -> bytes:
-        """Serializes to ``sensor_msgs/msg/PointCloud2`` ROS 2 CDR bytes."""
-        from src.utils.export import serialize_point_cloud2
-
-        return serialize_point_cloud2(sec, nanosec, frame_id, self.points, self.semantic_ids)

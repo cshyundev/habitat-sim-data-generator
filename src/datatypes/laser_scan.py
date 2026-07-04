@@ -18,7 +18,7 @@ class LaserScan:
         semantic_ids: Optional (N,) uint32 per-beam semantic/instance id,
             aligned with ``ranges``. LaserScan has no native semantic field,
             so this is carried over the wire via the message's
-            ``intensities`` field (see :meth:`to_cdr_bytes`).
+            ``intensities`` field (see ``McapExporter.write_laser_scan``).
         timestamp_ns: Optional capture timestamp.
         time_increment: Time between measurements, seconds. Defaults to 0.0.
         scan_time: Time between scans, seconds. Defaults to 0.0.
@@ -52,15 +52,3 @@ class LaserScan:
     def size(self) -> int:
         """Number of beams."""
         return self.ranges.shape[0]
-
-    def to_cdr_bytes(self, sec: int, nanosec: int, frame_id: str) -> bytes:
-        """Serializes to ``sensor_msgs/msg/LaserScan`` ROS 2 CDR bytes."""
-        from src.utils.export import serialize_laser_scan
-
-        return serialize_laser_scan(
-            sec, nanosec, frame_id,
-            self.angle_min, self.angle_max, self.angle_increment,
-            self.time_increment, self.scan_time,
-            self.range_min, self.range_max,
-            self.ranges, self.semantic_ids,
-        )
