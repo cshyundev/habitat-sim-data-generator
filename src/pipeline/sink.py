@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol
 
 from src.datatypes.motion_state import MotionState
-from src.datatypes.observation import SensorObservation
 from src.datatypes.pose import Pose3D
 from src.sensors.base_sensor import BaseSensor
 
@@ -40,7 +39,7 @@ class StreamEvent:
     """A single capture event (one or more sensors firing at the same instant)."""
     timestamp_ns: int
     motion_state: MotionState
-    observations: Dict[str, SensorObservation]
+    observations: Dict[str, Dict[str, Any]]
     firing_sensors: List[BaseSensor]
 
 

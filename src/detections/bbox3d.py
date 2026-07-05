@@ -1,4 +1,4 @@
-"""3D oriented bounding-box extractor (geometric product), decoupled from 2D.
+"""3D oriented bounding-box extractor (geometric output), decoupled from 2D.
 
 Precomputes a world-frame object-pose OBB per instance from the scene model, then
 per frame emits those OBBs for the instances visible in the camera (from the

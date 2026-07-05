@@ -208,27 +208,14 @@ class McapExporter:
         """Writes PointCloud2 message."""
         pts = np.asarray(cloud.points, dtype=np.float32)
         n = int(pts.shape[0])
-        has_semantic = cloud.semantic_ids is not None
 
         fields = [
             {"name": "x", "offset": 0, "datatype": 7, "count": 1},
             {"name": "y", "offset": 4, "datatype": 7, "count": 1},
             {"name": "z", "offset": 8, "datatype": 7, "count": 1},
         ]
-        if has_semantic:
-            fields.append({"name": "semantic", "offset": 12, "datatype": 6, "count": 1})
-            structured = np.zeros(
-                n, dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("sid", "<u4")]
-            )
-            structured["x"] = pts[:, 0]
-            structured["y"] = pts[:, 1]
-            structured["z"] = pts[:, 2]
-            structured["sid"] = np.asarray(cloud.semantic_ids, dtype=np.uint32)
-            raw_data = structured.tobytes()
-            point_step = 16
-        else:
-            raw_data = pts.tobytes()
-            point_step = 12
+        raw_data = pts.tobytes()
+        point_step = 12
 
         self._write(channel_key, timestamp_ns, {
             "header": _header(timestamp_ns, frame_id),

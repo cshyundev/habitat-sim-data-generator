@@ -97,7 +97,7 @@ class McapSink(StreamSink):
         export_config = McapExportConfig.from_config(self.config)
         sensor_channels = _resolve_sensor_channels(ctx, export_config)
 
-        # Dynamic sensor product channels.
+        # Dynamic sensor output channels.
         for key, channel in sensor_channels.items():
             self.exporter.register_channel_dynamic(
                 key=key, topic=channel["topic"], schema_name=channel["schema"]
@@ -169,7 +169,7 @@ class McapSink(StreamSink):
                 export_sensor_data(
                     exporter=self.exporter,
                     sensor=sensor,
-                    observation=ev.observations[sensor.name],
+                    outputs=ev.observations[sensor.name],
                     timestamp_ns=ev.timestamp_ns,
                 )
     def on_finish(self) -> None:

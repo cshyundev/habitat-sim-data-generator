@@ -13,7 +13,8 @@ consistent with the MCAP/offline view.
 import numpy as np
 
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
-from src.datatypes.observation import ImuObservation, PointCloudObservation, SensorCapture, SensorProduct
+from src.datatypes.imu import Imu
+from src.datatypes.point_cloud import PointCloud
 from src.visualization.backend import VisualizationBackend
 from src.utils.coords import (
     habitat_to_ros_pose,
@@ -145,41 +146,34 @@ class VisualizationSink(StreamSink):
             observation = ev.observations.get(sensor.name)
             if observation is None:
                 continue
-            if isinstance(observation, SensorCapture):
-                self._log_capture(sensor, observation)
+            if isinstance(observation, dict):
+                self.log_outputs(sensor, observation)
 
     def on_finish(self) -> None:
         self.backend.close()
 
     # ------------------------------------------------------------------
-    # Product handlers
+    # Output handlers
     # ------------------------------------------------------------------
-    def _log_capture(self, sensor, capture: SensorCapture) -> None:
-        for product in capture.products.values():
-            if product.output_name == "point_cloud":
-                self._log_lidar3d(sensor, product)
-            elif product.output_name == "imu":
-                self._log_imu(sensor, product)
-            elif product.output_name == "bbox3d":
-                self._log_boxes3d(product)
+    def log_outputs(self, sensor, outputs: dict) -> None:
+        for output_name, payload in outputs.items():
+            output_key = str(output_name).lower()
+            if output_key == "point_cloud":
+                self._log_lidar3d(sensor, payload)
+            elif output_key == "imu":
+                self._log_imu(sensor, payload)
+            elif output_key == "bbox3d":
+                self._log_boxes3d(payload)
 
-        image = next(
-            (p.payload for p in capture.products.values() if p.output_name == "rgb"),
-            None,
-        )
-        boxes2d = [
-            p for p in capture.products.values()
-            if p.output_name == "bbox2d"
-        ]
+        image = outputs.get("rgb")
+        boxes2d = outputs.get("bbox2d")
         if image is not None:
-            for product in boxes2d:
-                self._log_boxes2d(sensor, product, image)
+            self._log_boxes2d(sensor, boxes2d, image)
 
-    def _log_boxes3d(self, product: SensorProduct) -> None:
+    def _log_boxes3d(self, bbox3d) -> None:
         # 3D OBBs into the world scene (Habitat world -> ROS). The box rotation is
         # mapped by R_HAB_TO_ROS on the left (not conjugated) so the directional
         # half-extents stay aligned with their axes.
-        bbox3d = product.payload
         if bbox3d is None:
             return
         centers, halfs, quats, colors, labels = [], [], [], [], []
@@ -192,8 +186,7 @@ class VisualizationSink(StreamSink):
             labels.append(f"{o.instance_id}:{o.class_name}")
         self.backend.log_boxes3d(self.detections_path, centers, halfs, quats, colors, labels)
 
-    def _log_boxes2d(self, sensor, product: SensorProduct, img) -> None:
-        boxes2d = product.payload
+    def _log_boxes2d(self, sensor, boxes2d, img) -> None:
         if boxes2d is not None and img is not None:
             self.backend.log_image_boxes2d(
                 f"camera/{sensor.name}",
@@ -206,11 +199,9 @@ class VisualizationSink(StreamSink):
     # ------------------------------------------------------------------
     # Per-sensor-type handlers
     # ------------------------------------------------------------------
-    def _log_lidar3d(self, sensor, product: SensorProduct) -> None:
-        observation = product.payload
-        if not isinstance(observation, PointCloudObservation):
+    def _log_lidar3d(self, sensor, cloud) -> None:
+        if not isinstance(cloud, PointCloud):
             return
-        cloud = observation.cloud
         if cloud is None or cloud.size == 0:
             return
         ros_pc = habitat_to_ros_pointcloud(cloud.points).astype(np.float32)
@@ -221,9 +212,8 @@ class VisualizationSink(StreamSink):
             radius=0.025,
         )
 
-    def _log_imu(self, sensor, product: SensorProduct) -> None:
-        observation = product.payload
-        if not isinstance(observation, ImuObservation):
+    def _log_imu(self, sensor, observation) -> None:
+        if not isinstance(observation, Imu):
             return
         av = habitat_to_ros_position(np.asarray(observation.angular_velocity, dtype=np.float64))
         la = habitat_to_ros_position(np.asarray(observation.linear_acceleration, dtype=np.float64))

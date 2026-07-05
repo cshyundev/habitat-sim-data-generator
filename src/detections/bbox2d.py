@@ -1,4 +1,4 @@
-"""2D bounding-box extractor (image product), decoupled from 3D.
+"""2D bounding-box extractor (image output), decoupled from 3D.
 
 Casts the referenced camera once to get per-pixel instance (``object_id``) and
 class (``semantic_id``) maps, then emits one axis-aligned box per instance.

@@ -3,7 +3,6 @@ import habitat_sim
 
 from src.utils.tf import TFManager
 from src.datatypes.motion_state import MotionState
-from src.datatypes.observation import SensorCapture, SensorObservation, SensorProduct
 from src.sensors.base_sensor import BaseSensor
 from src.sensors.registry import get_sensor_class
 from src.robot_config import RobotBundle, SensorSpec
@@ -146,7 +145,7 @@ class SensorSuite:
         sensors: List[BaseSensor],
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-    ) -> Dict[str, SensorObservation]:
+    ) -> Dict[str, Dict[str, Any]]:
         """
         Fetches observations from the given sensors at the current motion state.
 
@@ -158,15 +157,17 @@ class SensorSuite:
         self.raycaster.bind(sim)
         self.raycaster.sync(sim)
 
-        observations: Dict[str, SensorObservation] = {}
+        observations: Dict[str, Dict[str, Any]] = {}
         for sensor in sensors:
             raw_outputs = sensor.get_observation(
                 sim, motion_state, self.tf_manager
             )
-            observations[sensor.name] = self._capture(sensor, raw_outputs)
+            observations[sensor.name] = self.capture_outputs(sensor, raw_outputs)
         return observations
 
-    def _capture(self, sensor: BaseSensor, raw_outputs: Dict[str, Any]) -> SensorCapture:
+    def capture_outputs(
+        self, sensor: BaseSensor, raw_outputs: Dict[str, Any]
+    ) -> Dict[str, Any]:
         spec = self._spec_by_name[sensor.name]
         if not isinstance(raw_outputs, dict):
             raise RuntimeError(
@@ -174,20 +175,12 @@ class SensorSuite:
                 "expected a mapping of output name to payload."
             )
 
-        products: Dict[str, SensorProduct] = {}
+        outputs: Dict[str, Any] = {}
         for output_name, payload in raw_outputs.items():
             output_key = str(output_name).lower()
             if output_key not in spec.outputs:
                 raise RuntimeError(
                     f"Sensor '{sensor.name}' returned undeclared output '{output_key}'."
                 )
-            output = spec.outputs[output_key]
-            frame_id = "map" if output_key == "bbox3d" else sensor.parent_link
-            products[output_key] = SensorProduct(
-                sensor_name=sensor.name,
-                output_name=output_key,
-                payload=payload,
-                frame_id=frame_id,
-                metadata=dict(output.params),
-            )
-        return SensorCapture(sensor_name=sensor.name, products=products)
+            outputs[output_key] = payload
+        return outputs

@@ -235,7 +235,7 @@ class _FakePluginSensor(BaseSensor):
 
 class TestSensorRegistry(unittest.TestCase):
     def test_builtin_types_registered(self):
-        for type_name in ("lidar3d", "camera", "imu"):
+        for type_name in ("lidar3d", "laser2d", "camera", "imu"):
             self.assertIn(type_name, registered_sensor_types())
 
     def test_unknown_type_raises_with_available_list(self):

@@ -8,7 +8,6 @@ from typing import Optional, Any, Dict
 from scipy.spatial.transform import Rotation
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.motion_state import MotionState
-from src.datatypes.observation import PointCloudObservation
 
 class LiDAR3D(BaseSensor, abc.ABC):
     """
@@ -78,12 +77,12 @@ class LiDAR3D(BaseSensor, abc.ABC):
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
         tf_manager: Any,
-    ) -> PointCloudObservation:
+    ) -> Dict[str, Any]:
         """
         Generate sensor observations.
 
         Returns:
-            A PointCloudObservation in the local sensor frame.
+            A mapping of output name to payload.
         """
         pass
 
@@ -96,12 +95,9 @@ class LiDAR3D(BaseSensor, abc.ABC):
     def to_point_cloud(
         self,
         range_image: np.ndarray,
-        semantic_image: np.ndarray = None,
-        frame: str = "local",
-        agent_state: habitat_sim.AgentState = None
     ) -> np.ndarray:
         """
-        Convert the 2D range image to a 3D point cloud.
+        Convert the 2D range image to local-frame lidar points.
         """
         if self.ray_directions is None:
             raise RuntimeError("Ray directions have not been initialized. Ensure subclass initializes them.")
@@ -120,38 +116,4 @@ class LiDAR3D(BaseSensor, abc.ABC):
         flat_directions = self.ray_directions.reshape(-1, 3)
         valid_directions = flat_directions[valid_mask]
 
-        local_points = valid_directions * valid_ranges[:, np.newaxis]
-
-        if frame == "global":
-            if agent_state is None:
-                raise ValueError("agent_state must be provided when converting to global frame")
-            
-            agent_pos = np.asarray(agent_state.position)
-            agent_rot = agent_state.rotation
-            q_agent_xyzw = np.array([agent_rot.x, agent_rot.y, agent_rot.z, agent_rot.w])
-            
-            sensor_pos_local = np.array([self.position.x, self.position.y, self.position.z])
-            
-            q_agent_mn = mn.Quaternion(mn.Vector3(agent_rot.x, agent_rot.y, agent_rot.z), agent_rot.w)
-            
-            sensor_pos_global = agent_pos + self._rotate_vectors(sensor_pos_local[np.newaxis, :], q_agent_xyzw)[0]
-            
-            q_sensor_global = q_agent_mn * self.orientation
-            q_sensor_global_xyzw = np.array([
-                q_sensor_global.vector.x,
-                q_sensor_global.vector.y,
-                q_sensor_global.vector.z,
-                q_sensor_global.scalar
-            ])
-            
-            global_points = sensor_pos_global + self._rotate_vectors(local_points, q_sensor_global_xyzw)
-            output_points = global_points
-        else:
-            output_points = local_points
-
-        if semantic_image is not None:
-            flat_semantics = semantic_image.flatten()
-            valid_semantics = flat_semantics[valid_mask]
-            output_points = np.column_stack((output_points, valid_semantics))
-
-        return output_points.astype(np.float32)
+        return (valid_directions * valid_ranges[:, np.newaxis]).astype(np.float32)

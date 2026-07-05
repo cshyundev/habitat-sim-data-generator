@@ -83,7 +83,6 @@ class StreamingPipeline:
 
         self._plan_trajectory()
 
-
         event_count = 0
         try:
             for sink in sinks:
@@ -92,7 +91,7 @@ class StreamingPipeline:
                     scene_markers=self.scene_markers,
                     tf_manager=self.sensor_suite.tf_manager,
                     sensors=self.sensor_suite.sensors,
-            sensor_outputs=self.sensor_suite.sensor_outputs(),
+                    sensor_outputs=self.sensor_suite.sensor_outputs(),
                     artifacts=self.artifacts,
                     category_names=self.category_names,
                 ))
@@ -117,7 +116,7 @@ class StreamingPipeline:
                         observations=observations,
                         firing_sensors=firing,
                     ))
-                    
+
                 event_count += 1
                 
                 if event_count % 100 == 0:

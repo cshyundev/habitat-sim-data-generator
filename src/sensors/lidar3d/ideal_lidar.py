@@ -7,7 +7,6 @@ from src.sensors.lidar3d.base_lidar import LiDAR3D
 from src.datatypes.pose import Pose3D
 from src.datatypes.motion_state import MotionState
 from src.datatypes.point_cloud import PointCloud
-from src.datatypes.observation import PointCloudObservation
 from src.sensors.registry import register_sensor
 
 @register_sensor("lidar3d")
@@ -84,8 +83,7 @@ class IdealLiDAR3D(LiDAR3D):
         Run spherical ray casting and return a local-frame PointCloud.
 
         Returns:
-            PointCloudObservation with points already converted from the
-            range/semantic image via ``to_point_cloud(frame="local")``.
+            PointCloud with points in the lidar sensor frame.
         """
         H, W = self.altitude_bins, self.azimuth_bins
 
@@ -123,16 +121,12 @@ class IdealLiDAR3D(LiDAR3D):
             max_distance=self.max_distance,
         )
 
-        # Misses keep +inf range / 0 semantic, matching the original convention.
+        # Misses keep +inf range, matching the original convention.
         range_image = res.distance.reshape(H, W).astype(np.float32)
-        semantic_image = res.object_id.reshape(H, W).astype(np.uint32)
 
-        pc = self.to_point_cloud(range_image, semantic_image, frame="local")
+        pc = self.to_point_cloud(range_image)
         cloud = PointCloud(
-            points=pc[:, :3],
-            semantic_ids=pc[:, 3].astype(np.uint32) if pc.shape[1] == 4 else None,
-            frame="local",
+            points=pc,
             timestamp_ns=motion_state.timestamp_ns,
         )
-        observation = PointCloudObservation(cloud=cloud)
-        return {"point_cloud": observation}
+        return {"point_cloud": cloud}

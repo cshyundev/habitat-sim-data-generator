@@ -133,7 +133,6 @@ class _RecBackend:
 class TestVizSink(unittest.TestCase):
     def test_sink_logs_2d_and_3d_detections(self):
         from src.datatypes.motion_state import MotionState
-        from src.datatypes.observation import SensorCapture, SensorProduct
         from src.visualization.visualization_sink import VisualizationSink
 
         be = _RecBackend()
@@ -152,16 +151,13 @@ class TestVizSink(unittest.TestCase):
             "sensor_type": "camera",
             "parent_link": "camera_link",
         })()
-        obs = SensorCapture(
-            sensor_name="camera_front",
-            products={
-                "rgb": SensorProduct("camera_front", "rgb", np.zeros((4, 4, 3), np.uint8), "camera_link"),
-                "bbox2d": SensorProduct("camera_front", "bbox2d", [d2], "camera_link"),
-                "bbox3d": SensorProduct("camera_front", "bbox3d", {"world": [o3], "camera": []}, "map"),
-            },
-        )
+        obs = {
+            "rgb": np.zeros((4, 4, 3), np.uint8),
+            "bbox2d": [d2],
+            "bbox3d": {"world": [o3], "camera": []},
+        }
 
-        sink._log_capture(cam, obs)
+        sink.log_outputs(cam, obs)
         self.assertIsNotNone(be.b3d)
         self.assertEqual(be.b2d[0], [1, 2, 3, 4])  # 2D box passthrough
 

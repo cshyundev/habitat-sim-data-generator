@@ -2,6 +2,7 @@ import unittest
 import numpy as np
 
 from src.datatypes.motion_state import MotionState
+from src.datatypes.imu import Imu
 from src.sensors.imu.ideal_imu import IdealIMU
 from src.utils.tf import TFManager
 
@@ -98,6 +99,7 @@ class TestIdealIMU(unittest.TestCase):
         st = _state([0.1, 0.2, 0.3], [0.4, 0.5, 0.6])
         obs = self.imu.get_observation(sim=None, motion_state=st, tf_manager=None)
         obs = obs["imu"]
+        self.assertIsInstance(obs, Imu)
         self.assertEqual(obs.angular_velocity.shape, (3,))
         self.assertEqual(obs.linear_acceleration.shape, (3,))
 

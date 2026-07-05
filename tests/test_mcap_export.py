@@ -58,7 +58,7 @@ class TestMcapExportRoundTrip(unittest.TestCase):
         exp.write_static_tf(0, "base_link", "camera_link", pose)
         exp.write_dynamic_tf(1_000_000_000, "map", "base_link", pose)
 
-        cloud = PointCloud(points=np.random.rand(50, 3).astype(np.float32), semantic_ids=np.arange(50, dtype=np.uint32))
+        cloud = PointCloud(points=np.random.rand(50, 3).astype(np.float32))
         exp.write_point_cloud(1_000_000_000, "lidar_link", "lidar_3d", cloud)
 
         cloud2 = PointCloud(points=np.random.rand(7, 3).astype(np.float32))
@@ -126,8 +126,8 @@ class TestMcapExportRoundTrip(unittest.TestCase):
 
         cloud = by_topic["/lidar"]
         self.assertEqual(cloud.width, 50)
-        self.assertEqual(cloud.point_step, 16)
-        self.assertEqual(len(cloud.data), 50 * 16)
+        self.assertEqual(cloud.point_step, 12)
+        self.assertEqual(len(cloud.data), 50 * 12)
 
         # Second lidar on its own topic -- must not collide with the first.
         cloud2 = by_topic["/lidar2"]
@@ -221,7 +221,7 @@ class TestMcapSidecars(unittest.TestCase):
 
 
 class TestMcapSinkMapExport(unittest.TestCase):
-    def test_registers_sensor_product_channels(self):
+    def test_registers_sensor_output_channels(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "sample.mcap")
             sink = McapSink(path, {

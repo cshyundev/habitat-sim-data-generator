@@ -5,7 +5,7 @@ from typing import Any, Optional, Dict
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.pose import Pose3D
 from src.datatypes.motion_state import MotionState
-from src.datatypes.observation import ImuObservation
+from src.datatypes.imu import Imu
 from src.sensors.registry import register_sensor
 
 
@@ -101,7 +101,7 @@ class IdealIMU(BaseSensor):
         Returns gyroscope and accelerometer readings in the IMU sensor frame.
 
         Returns:
-            ImuObservation with angular velocity [rad/s] and linear acceleration
+            Imu with angular velocity [rad/s] and linear acceleration
             [m/s^2] in this IMU frame.
         """
         omega_base = np.asarray(motion_state.angular_velocity_body, dtype=np.float64)
@@ -128,7 +128,7 @@ class IdealIMU(BaseSensor):
         omega_imu = imu_R_base @ omega_base
         accel_imu = imu_R_base @ accel_at_imu
 
-        observation = ImuObservation(
+        observation = Imu(
             angular_velocity=omega_imu,
             linear_acceleration=accel_imu,
         )
