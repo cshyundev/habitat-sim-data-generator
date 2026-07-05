@@ -4,11 +4,11 @@ Replays sensor-shaped ray batches over sampled poses in the real scene and
 compares the per-ray loop of ``sim.cast_ray`` (the current slow path) with the
 batched :class:`~src.raycasting.MLXRaycaster`, reporting speed and agreement.
 
-  uv run python bench_raycast.py                              # lidar, collision, 10 frames
-  uv run python bench_raycast.py --sensor laser
-  uv run python bench_raycast.py --sensor camera --max-rays 20000 --frames 3
-  uv run python bench_raycast.py --geometry visual            # accuracy/realism run
-  uv run python bench_raycast.py --json out.json
+  uv run python scripts/bench_raycast.py                              # lidar, collision, 10 frames
+  uv run python scripts/bench_raycast.py --sensor laser
+  uv run python scripts/bench_raycast.py --sensor camera --max-rays 20000 --frames 3
+  uv run python scripts/bench_raycast.py --geometry visual            # accuracy/realism run
+  uv run python scripts/bench_raycast.py --json out.json
 
 Default geometry is ``collision`` for apples-to-apples parity with cast_ray
 (a Bullet collision raycast); ``--geometry visual`` characterizes the more
@@ -19,12 +19,18 @@ Production code is untouched; this is a standalone evaluation harness.
 
 import argparse
 import json
+import os
+import sys
 import time
 
 import numpy as np
 import yaml
 import magnum as mn
 import habitat_sim
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 from src.robot_config import load_robot
 from src.sensors.suite import SensorSuite

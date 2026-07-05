@@ -1,4 +1,5 @@
 from typing import List, Optional
+import logging
 import numpy as np
 import habitat_sim
 
@@ -9,6 +10,8 @@ from src.planners.map_converter import generate_occupancy_grid_from_sim
 from src.planners.global_planning.base import BaseGlobalPlanner
 from src.planners.global_planning.params import ZigzagCoverageParams
 from src.planners.global_planning import bcd
+
+logger = logging.getLogger(__name__)
 
 
 class ZigzagCoveragePlanner(BaseGlobalPlanner):
@@ -57,7 +60,8 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
             else:
                 try:
                     height_offset = float(sim.get_agent(0).get_state().position[1])
-                except Exception:
+                except (AttributeError, IndexError, TypeError, ValueError) as exc:
+                    logger.debug("Could not read agent height from simulator: %s", exc)
                     height_offset = 0.0
 
         return self.plan_from_map(occ_grid, start_pose, height_offset=height_offset, **kwargs)
@@ -84,8 +88,7 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
 
         cells = bcd.decompose_into_monotone_cells(safe_mask, sweep_direction)
         if not cells:
-            print("[ZigzagCoveragePlanner] Warning: No monotone cells found. "
-                  "Free space might be too narrow.")
+            logger.warning("No monotone cells found. Free space might be too narrow.")
             return []
 
         spacing_pixels = max(1, int(round(zigzag_spacing / resolution)))
@@ -112,7 +115,7 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
         free_mask = occ_grid.data == GRID_2D_FREE
         grid_path = bcd.connect_paths(cell_paths, start_grid, safe_mask, free_mask)
         if not grid_path:
-            print("[ZigzagCoveragePlanner] Warning: Failed to connect grid paths.")
+            logger.warning("Failed to connect grid paths.")
             return []
 
         grid_waypoints = bcd.compress_path(grid_path)

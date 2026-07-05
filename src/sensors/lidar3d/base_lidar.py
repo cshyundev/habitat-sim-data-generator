@@ -5,6 +5,7 @@ import magnum as mn
 # pyrefly: ignore [missing-import]
 import habitat_sim
 from typing import Optional, Any
+from scipy.spatial.transform import Rotation
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.motion_state import MotionState
 from src.datatypes.observation import PointCloudObservation
@@ -81,12 +82,7 @@ class LiDAR3D(BaseSensor, abc.ABC):
         """
         Vectorized rotation of 3D vectors by a quaternion.
         """
-        q_vec = q_xyzw[:3]
-        w = q_xyzw[3]
-        
-        cross1 = np.cross(q_vec, vectors) + w * vectors
-        cross2 = np.cross(q_vec, cross1)
-        return vectors + 2.0 * cross2
+        return Rotation.from_quat(q_xyzw).apply(vectors)
 
     def to_point_cloud(
         self,

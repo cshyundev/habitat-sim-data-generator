@@ -29,6 +29,7 @@ rigid (clean inverse, distance-preserving) for two-level traversal.
 from __future__ import annotations
 
 import os
+import logging
 import xml.etree.ElementTree as ET
 from typing import Dict, Optional
 
@@ -45,6 +46,8 @@ from src.raycasting.scene import (
     SceneModel,
     face_normals,
 )
+
+logger = logging.getLogger(__name__)
 
 _MT_MAP = {
     habitat_sim.physics.MotionType.STATIC: STATIC,
@@ -64,7 +67,7 @@ def _load_triangles(path: str) -> Optional[np.ndarray]:
     try:
         mesh = trimesh.load(path, force="mesh", process=False)
     except Exception as exc:  # pragma: no cover - defensive
-        print(f"[scene_extractor] WARN: failed to load '{path}': {exc}")
+        logger.warning("Failed to load mesh '%s': %s", path, exc)
         return None
     faces = np.asarray(getattr(mesh, "faces", []), dtype=np.int64)
     verts = np.asarray(getattr(mesh, "vertices", []), dtype=np.float64)
@@ -134,8 +137,8 @@ def _parse_urdf_visuals(urdf_path: str) -> dict:
     base = os.path.dirname(urdf_path)
     try:
         root = ET.parse(urdf_path).getroot()
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"[scene_extractor] WARN: cannot parse URDF '{urdf_path}': {exc}")
+    except (OSError, ET.ParseError) as exc:  # pragma: no cover - defensive
+        logger.warning("Cannot parse URDF '%s': %s", urdf_path, exc)
         return out
     for link in root.findall("link"):
         visuals = []
@@ -186,7 +189,7 @@ def _add_stage(sim, geometry: str, b: _Builder) -> None:
     try:
         st = sim.get_stage_initialization_template()
     except Exception as exc:  # pragma: no cover - defensive
-        print(f"[scene_extractor] WARN: no stage template: {exc}")
+        logger.warning("No stage template available: %s", exc)
         return
     path = _asset_path(st, geometry)
     stage_id = int(getattr(habitat_sim, "stage_id", 0))
@@ -234,14 +237,15 @@ def _link_local_mesh(visuals: list) -> Optional[np.ndarray]:
 def _add_articulated_objects(sim, b: _Builder) -> None:
     try:
         aom = sim.get_articulated_object_manager()
-    except Exception:  # pragma: no cover - defensive
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("No articulated object manager available: %s", exc)
         return
     for handle in aom.get_object_handles():
         ao = aom.get_object_by_handle(handle)
         urdf = getattr(ao.creation_attributes, "urdf_fullpath", "") or ""
         link_visuals = _parse_urdf_visuals(urdf)
         if not link_visuals:
-            print(f"[scene_extractor] WARN: no URDF visuals for AO '{handle}'")
+            logger.warning("No URDF visuals for articulated object '%s'", handle)
             continue
         link_to_obj = dict(getattr(ao, "link_ids_to_object_ids", {}) or {})
         semantic = int(getattr(ao, "semantic_id", 0))
@@ -254,6 +258,7 @@ def _add_articulated_objects(sim, b: _Builder) -> None:
                     dtype=np.float32,
                 )
             except Exception:
+                logger.debug("Skipping articulated link '%s' on '%s'", name, handle, exc_info=True)
                 continue
             if not np.all(np.isfinite(world)):
                 continue
@@ -340,10 +345,11 @@ def read_dynamic_transforms(
                         dtype=np.float32,
                     )
                 except Exception:
+                    logger.debug("Skipping live articulated link %s on '%s'", link_id, handle, exc_info=True)
                     continue
                 live[int(oid)] = (T, awake)
-    except Exception:  # pragma: no cover - defensive
-        pass
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("No articulated dynamic transforms available: %s", exc)
 
     changes: Dict[int, np.ndarray] = {}
     for i in range(model.num_instances):

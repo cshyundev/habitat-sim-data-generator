@@ -19,6 +19,7 @@ argument order) so the camera math is unchanged.
 Author of original spatialkit ops: Sehyun Cha (cshyundev@gmail.com), MIT License.
 """
 
+import logging
 from typing import Any, List, Optional, Union
 import numpy as np
 from numpy import ndarray
@@ -28,6 +29,7 @@ from numpy import ndarray
 # ---------------------------------------------------------------------------
 # spatialkit's ArrayLike is "np.ndarray | torch.Tensor"; here it is numpy-only.
 ArrayLike = np.ndarray
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -58,11 +60,11 @@ class InvalidCameraParameterError(ValueError):
 # Logging  (spatialkit.common.logger)
 # ---------------------------------------------------------------------------
 def LOG_WARN(msg: str) -> None:
-    print(f"[camera][WARN] {msg}")
+    logger.warning(msg)
 
 
 def LOG_CRITICAL(msg: str) -> None:
-    print(f"[camera][CRITICAL] {msg}")
+    logger.critical(msg)
 
 
 # ---------------------------------------------------------------------------

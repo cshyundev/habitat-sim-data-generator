@@ -13,18 +13,23 @@ Design boundary (intentional):
              change; the only contract with the renderer is "List[Pose3D]".
 
 Usage:
-  uv run python animate_path.py                 # real sim from config_stream.yaml
-  uv run python animate_path.py --synthetic     # no sim; synthetic room grid
-  uv run python animate_path.py --speed 4       # play 4x faster
-  uv run python animate_path.py --save out.gif  # also write a GIF
+  uv run python scripts/animate_path.py                 # real sim from config_stream.yaml
+  uv run python scripts/animate_path.py --synthetic     # no sim; synthetic room grid
+  uv run python scripts/animate_path.py --speed 4       # play 4x faster
+  uv run python scripts/animate_path.py --save out.gif  # also write a GIF
 """
 import os
+import sys
 import math
 import argparse
 from typing import List, Tuple
 
 import numpy as np
 import yaml
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 from src.datatypes.pose import Pose3D
 from src.datatypes.map import (

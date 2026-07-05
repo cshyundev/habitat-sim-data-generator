@@ -5,6 +5,7 @@ Builds the global->local plan and drives the event-driven capture loop, emitting
 a StreamEvent per capture to all attached sinks. Contains no export or
 visualization logic -- those live in sinks.
 """
+import logging
 import numpy as np
 import habitat_sim
 from typing import List
@@ -25,6 +26,8 @@ from src.planners.local_planning import (
     DifferentialDriveLocalPlanner,
     DifferentialDriveParams,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_detection_camera(sensor_suite: SensorSuite, block: dict, key: str) -> CameraSensor:
@@ -175,7 +178,7 @@ class StreamingPipeline:
                 event_count += 1
                 
                 if event_count % 100 == 0:
-                    print(f"Event Count: {event_count} | current Time(s) {t / 10e9}")
+                    logger.info("Event Count: %d | current Time(s) %.3f", event_count, t / 1e9)
 
         finally:
             for sink in sinks:

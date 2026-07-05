@@ -2,7 +2,7 @@
 Rerun implementation of VisualizationBackend.
 
 This is the ONLY module that imports rerun. It reuses the logging idioms from
-visualize_mcap_rerun.py, updated to the rerun 0.33 API:
+scripts/visualize_mcap_rerun.py, updated to the rerun 0.33 API:
   - timeline:  rr.set_time(timeline, duration=seconds)   (set_time_seconds removed)
   - scalars:   rr.Scalars(value)
 No recording file is saved (spawn=True viewer only).

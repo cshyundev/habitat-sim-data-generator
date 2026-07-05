@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Dict
+
+logger = logging.getLogger(__name__)
 
 
 def build_category_names(sim) -> Dict[int, str]:
@@ -19,7 +22,8 @@ def build_category_names(sim) -> Dict[int, str]:
     for c in cats:
         try:
             out[int(c.index())] = str(c.name())
-        except Exception:
+        except (AttributeError, TypeError, ValueError) as exc:
+            logger.debug("Skipping malformed semantic category %r: %s", c, exc)
             continue
     return out
 

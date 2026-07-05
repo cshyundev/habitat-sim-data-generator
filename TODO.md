@@ -124,9 +124,10 @@ removes hand-rolled CDR** — only do this if some custom serialization survives
 
 ## P3 — Minor, isolated fixes
 
-### 14. Progress log time off by 10×
+### 14. ~~Progress log time off by 10×~~ DONE
 **Cause:** `streaming.py:159` divides by `10e9` (=1e10) instead of `1e9`.
 One-character fix, isolated.
+**Resolution:** Progress logging now divides nanoseconds by `1e9`.
 
 ### 15. ~~Golden-file test decoding MCAP with an external reader~~ DONE (via item 1)
 **Cause:** CDR writer is only round-tripped against its own mirrored reader —
@@ -135,26 +136,37 @@ one test decoding via `mcap-ros2-support`.
 **Resolution:** `tests/test_mcap_export.py` round-trips every channel through
 `mcap_ros2`'s independent decoder and asserts every schema has non-empty data.
 
-### 16. Deduplicate quaternion math via scipy
+### 16. ~~Deduplicate quaternion math via scipy~~ DONE
 **Cause:** `_quaternion_to_euler` and `_rotate_vectors` in `camera.py`
 (duplicated from `IdealLiDAR3D`) reimplement `scipy.spatial.transform.Rotation`,
 already a dependency and already used in `coords.py`.
+**Resolution:** Camera and 3D LiDAR vector rotation now use
+`scipy.spatial.transform.Rotation`; camera Euler conversion also uses scipy.
 
-### 17. Audit the 22 `except Exception` blocks
+### 17. ~~Audit the 22 `except Exception` blocks~~ DONE
 **Cause:** Beyond item 3's sensors, remaining broad handlers
 (`scene_extractor.py`, `backend.py`, `categories.py`, `zigzag_coverage.py`)
 should each justify swallowing or narrow/log. Mostly guarding optional sim
 APIs — audit, don't blanket-remove.
+**Resolution:** Optional Habitat/asset API failures now log via `logging`
+instead of silent pass/print where practical; category and planner handlers were
+narrowed where their failure modes are known.
 
-### 18. Logging + tooling baseline
+### 18. ~~Logging + tooling baseline~~ DONE
 **Cause:** `print()` everywhere (incl. "Visualiztion" typo), no ruff/mypy/CI
 configured despite a stray `# pyrefly: ignore` in `coords.py`. Low urgency,
 compounding value.
+**Resolution:** Core library/runner progress and warnings now use `logging`,
+and the visible "Visualiztion" typo is fixed. CLI/diagnostic scripts keep
+`print()` for intentional terminal output.
 
-### 19. Repo hygiene
+### 19. ~~Repo hygiene~~ DONE
 **Cause:** `read_mcap.py`, `visualize_mcap_rerun.py`, `animate_path.py`,
 `bench_raycast.py` at root while `scripts/` exists; `output_mcap/`,
 `__pycache__/` noise in the tree.
+**Resolution:** Root helper scripts moved into `scripts/`, generated
+`__pycache__` and `output_mcap` directories removed, and existing `.gitignore`
+already covers those generated artifacts.
 
 ## P4 — New features
 

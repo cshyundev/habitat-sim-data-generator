@@ -14,12 +14,15 @@ holds one ``RaycastBackend`` and you swap the backend to change the engine.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import logging
 
 import numpy as np
 import magnum as mn
 import habitat_sim
 
 from src.raycasting.types import RaycastResult
+
+logger = logging.getLogger(__name__)
 
 
 class RaycastBackend(ABC):
@@ -65,8 +68,8 @@ class SimRaycastBackend(RaycastBackend):
                 for handle in rom.get_object_handles():
                     o = rom.get_object_by_handle(handle)
                     self._obj_id_to_sem_id[int(o.object_id)] = int(getattr(o, "semantic_id", 0))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Rigid-object semantic lookup unavailable: %s", exc)
 
             # 2. Articulated objects
             try:
@@ -78,8 +81,8 @@ class SimRaycastBackend(RaycastBackend):
                     for oid in link_to_obj.values():
                         self._obj_id_to_sem_id[int(oid)] = sem_id
                     self._obj_id_to_sem_id[int(ao.object_id)] = sem_id
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Articulated-object semantic lookup unavailable: %s", exc)
 
     def cast_rays(self, origins, directions, min_distance=0.0, max_distance=float("inf")):
         if self._sim is None:

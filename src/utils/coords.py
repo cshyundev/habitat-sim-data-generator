@@ -1,8 +1,11 @@
+import logging
 import numpy as np
 from scipy.spatial.transform import Rotation
 # pyrefly: ignore [missing-import]
 from src.datatypes.pose import Pose3D
 from src.datatypes.bbox import OBB3D
+
+logger = logging.getLogger(__name__)
 
 # Habitat -> ROS basis change (X_ros=-Z_hab, Y_ros=-X_hab, Z_ros=Y_hab). Applied
 # on the LEFT to a box rotation so its axes (and directional half-extents) map
@@ -159,8 +162,8 @@ def parse_urdf_visuals(urdf_path):
     try:
         tree = ET.parse(urdf_path)
         root = tree.getroot()
-    except Exception as e:
-        print(f"[Error] Failed to parse URDF xml at {urdf_path}: {e}")
+    except (OSError, ET.ParseError) as e:
+        logger.warning("Failed to parse URDF xml at %s: %s", urdf_path, e)
         return {}
     
     link_visuals = {}
@@ -245,7 +248,7 @@ def extract_visual_map_as_markers(sim, config) -> list:
     
     # 1. Load stage mesh
     if os.path.exists(stage_path):
-        print(f"   - [3D Map] Stage 메쉬 로드 중: {os.path.basename(stage_path)}")
+        logger.info("3D map: loading stage mesh %s", os.path.basename(stage_path))
         try:
             m_stage = trimesh.load(stage_path)
             if isinstance(m_stage, trimesh.Scene):
@@ -271,11 +274,11 @@ def extract_visual_map_as_markers(sim, config) -> list:
             })
             marker_id_counter += 1
         except Exception as e:
-            print(f"[Error] Stage 메쉬 로드 실패: {e}")
+            logger.warning("Failed to load stage mesh: %s", e)
             
     # 2. Load rigid objects meshes
     rigid_obj_mgr = sim.get_rigid_object_manager()
-    print(f"   - [3D Map] Rigid Objects 메쉬 로드 중 (총 {len(rigid_obj_mgr.get_object_handles())}개)...")
+    logger.info("3D map: loading rigid object meshes (%d total)", len(rigid_obj_mgr.get_object_handles()))
     for handle in rigid_obj_mgr.get_object_handles():
         obj = rigid_obj_mgr.get_object_by_handle(handle)
         template = obj.creation_attributes
@@ -312,11 +315,11 @@ def extract_visual_map_as_markers(sim, config) -> list:
                 })
                 marker_id_counter += 1
             except Exception as e:
-                pass
+                logger.debug("Skipping rigid object mesh %s: %s", handle, e)
 
     # 3. Load articulated objects meshes
     ao_mgr = sim.get_articulated_object_manager()
-    print(f"   - [3D Map] Articulated Objects 메쉬 로드 중 (총 {len(ao_mgr.get_object_handles())}개)...")
+    logger.info("3D map: loading articulated object meshes (%d total)", len(ao_mgr.get_object_handles()))
     for handle in ao_mgr.get_object_handles():
         ao = ao_mgr.get_object_by_handle(handle)
         urdf_rel = ao.creation_attributes.urdf_fullpath
@@ -381,8 +384,8 @@ def extract_visual_map_as_markers(sim, config) -> list:
                                 })
                                 marker_id_counter += 1
                             except Exception as e:
-                                print(f"[Warning] Failed to process visual mesh {vis['filename']}: {e}")
+                                logger.warning("Failed to process visual mesh %s: %s", vis["filename"], e)
             except Exception as e:
-                print(f"[Warning] Failed to process articulated object {handle}: {e}")
+                logger.warning("Failed to process articulated object %s: %s", handle, e)
                 
     return markers_list

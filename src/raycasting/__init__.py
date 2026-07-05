@@ -6,7 +6,7 @@ two-level BVH once (:mod:`mlx_backend`), intersect whole ray batches on the GPU,
 update only transforms when the scene changes dynamically.
 
 This package is standalone and does not touch the production sensor/pipeline code;
-see ``bench_raycast.py`` at the repo root for the speed/accuracy comparison.
+see ``scripts/bench_raycast.py`` for the speed/accuracy comparison.
 """
 
 from src.raycasting.types import RaycastResult

@@ -3,6 +3,7 @@ import numpy as np
 import magnum as mn
 import habitat_sim
 from typing import Any, Optional, Dict
+from scipy.spatial.transform import Rotation
 
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.motion_state import MotionState
@@ -278,31 +279,12 @@ class CameraSensor(BaseSensor):
     # ------------------------------------------------------------------
     def _quaternion_to_euler(self, q_xyzw: np.ndarray) -> mn.Vector3:
         """Convert quaternion [x, y, z, w] to Euler (pitch, yaw, roll) radians."""
-        x, y, z, w = q_xyzw
-
-        sinr_cosp = 2 * (w * x + y * z)
-        cosr_cosp = 1 - 2 * (x * x + y * y)
-        roll = math.atan2(sinr_cosp, cosr_cosp)
-
-        sinp = 2 * (w * y - z * x)
-        if abs(sinp) >= 1:
-            pitch = math.copysign(math.pi / 2, sinp)
-        else:
-            pitch = math.asin(sinp)
-
-        siny_cosp = 2 * (w * z + x * y)
-        cosy_cosp = 1 - 2 * (y * y + z * z)
-        yaw = math.atan2(siny_cosp, cosy_cosp)
-
+        roll, pitch, yaw = Rotation.from_quat(q_xyzw).as_euler("xyz")
         return mn.Vector3(pitch, yaw, roll)
 
     def _rotate_vectors(self, vectors: np.ndarray, q_xyzw: np.ndarray) -> np.ndarray:
         """Vectorized rotation of 3D vectors by a quaternion (same as IdealLiDAR3D)."""
-        q_vec = q_xyzw[:3]
-        w = q_xyzw[3]
-        cross1 = np.cross(q_vec, vectors) + w * vectors
-        cross2 = np.cross(q_vec, cross1)
-        return vectors + 2.0 * cross2
+        return Rotation.from_quat(q_xyzw).apply(vectors)
 
     # ------------------------------------------------------------------
     # BaseSensor interface

@@ -20,6 +20,7 @@ The traversal is a custom Metal compute kernel via ``mlx.core.fast.metal_kernel`
 
 from __future__ import annotations
 
+import logging
 from typing import Mapping
 
 import numpy as np
@@ -28,6 +29,8 @@ from src.raycasting.backend import RaycastBackend
 from src.raycasting.bvh import build_bvh
 from src.raycasting.scene import STATIC, SceneModel
 from src.raycasting.types import RaycastResult
+
+logger = logging.getLogger(__name__)
 
 try:
     import mlx.core as mx
@@ -239,10 +242,12 @@ class MLXRaycaster(RaycastBackend):
         from src.raycasting.scene_extractor import extract_scene_model
 
         self.build(extract_scene_model(sim, geometry=self.geometry))
-        print(
-            f"[MLXRaycaster] built {self.geometry} scene: "
-            f"{self._model.num_instances} instances, "
-            f"{self._model.num_unique_meshes} unique meshes, {self.num_triangles} tris"
+        logger.info(
+            "MLXRaycaster built %s scene: %d instances, %d unique meshes, %d tris",
+            self.geometry,
+            self._model.num_instances,
+            self._model.num_unique_meshes,
+            self.num_triangles,
         )
 
     def sync(self, sim) -> None:

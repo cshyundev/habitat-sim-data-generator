@@ -11,6 +11,7 @@ modular sinks; this runner only parses flags and wires them together.
 """
 import os
 import argparse
+import logging
 import yaml
 
 from src.robot_config import load_robot
@@ -21,6 +22,8 @@ from src.pipeline.streaming import build_pipeline
 from src.pipeline.mcap_sink import McapSink
 from src.visualization.rerun_backend import RerunBackend
 from src.visualization.visualization_sink import VisualizationSink
+
+logger = logging.getLogger(__name__)
 
 
 def parse_args():
@@ -35,22 +38,23 @@ def parse_args():
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
     runtime_config = validate_runtime_config(config)
 
-    print("1. Initialize Sensor...")
+    logger.info("1. Initialize Sensor...")
     robot = load_robot(config)
     sensor_suite = SensorSuite(robot, config)
 
-    print(f"2. Initialize habitat simulator (Scene: {runtime_config.scene_id})...")
+    logger.info("2. Initialize habitat simulator (Scene: %s)...", runtime_config.scene_id)
     sim = create_simulator(config, robot, sensor_suite)
 
     try:
-        print("3. Build Data Pipeline...")
+        logger.info("3. Build Data Pipeline...")
         pipeline = build_pipeline(config, sim, sensor_suite)
-        print(f"   - length of trajectory: {pipeline.duration_ns / 1e9:.2f}s")
+        logger.info("   - length of trajectory: %.2fs", pipeline.duration_ns / 1e9)
 
         sinks = []
         if not args.no_mcap:
@@ -58,22 +62,22 @@ def main():
             os.makedirs(output_dir, exist_ok=True)
             mcap_path = os.path.join(output_dir, runtime_config.output_filename)
             sinks.append(McapSink(mcap_path, config))
-            print(f"   - MCAP Output Path: {mcap_path}")
+            logger.info("   - MCAP Output Path: %s", mcap_path)
 
         if args.visualize:
             # Imported lazily so the data-only path needs no rerun install.
             sinks.append(VisualizationSink(RerunBackend()))
-            print("   - Live Rerun Visualiztion activated")
+            logger.info("   - Live Rerun Visualization activated")
 
         if not sinks:
-            print("[WARN] There is no activated sink (--no-mcap nor --visualize). EXIT.")
+            logger.warning("There is no activated sink (--no-mcap nor --visualize). EXIT.")
             return
 
-        print("4. Run Pipeline...")
+        logger.info("4. Run Pipeline...")
         event_count = pipeline.run(sinks)
-        print("==================================================")
-        print(f"Complete: Total {event_count} Events.")
-        print("==================================================")
+        logger.info("==================================================")
+        logger.info("Complete: Total %d Events.", event_count)
+        logger.info("==================================================")
 
     finally:
         sim.close()
