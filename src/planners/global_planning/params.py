@@ -19,8 +19,12 @@ class ZigzagCoverageParams:
 
     @classmethod
     def from_config(cls, config: dict) -> 'ZigzagCoverageParams':
-        """Parses the "planner" section of a configuration dictionary."""
-        p_cfg = config.get("planner", {})
+        """Parses zigzag params from new or legacy planner config."""
+        planner_cfg = config.get("planner", {}) or {}
+        if isinstance(planner_cfg, dict) and "global" in planner_cfg:
+            p_cfg = (planner_cfg.get("global") or {}).get("params", {}) or {}
+        else:
+            p_cfg = planner_cfg
         return cls(
             resolution=p_cfg.get("resolution", 0.05),
             wall_distance=p_cfg.get("wall_distance", 0.3),

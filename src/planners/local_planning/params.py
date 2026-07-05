@@ -19,9 +19,14 @@ class DifferentialDriveParams:
         """
         Parses a configuration dictionary into a DifferentialDriveParams.
 
-        Reads from the "local_planner" section, falling back to "planner".
+        Reads from planner.local.params, falling back to legacy local_planner
+        and then legacy planner.
         """
-        p_cfg = config.get("local_planner", config.get("planner", {}))
+        planner_cfg = config.get("planner", {}) or {}
+        if isinstance(planner_cfg, dict) and "local" in planner_cfg:
+            p_cfg = (planner_cfg.get("local") or {}).get("params", {}) or {}
+        else:
+            p_cfg = config.get("local_planner", planner_cfg)
 
         return cls(
             linear_velocity=p_cfg.get("linear_velocity", 0.3),

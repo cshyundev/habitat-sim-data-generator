@@ -1,19 +1,24 @@
 """
 MCAP export sink: writes the full streaming output to an MCAP file.
 
-This is the backend's file frontend -- it records everything (occupancy grid,
-3D scene, static TF, per-event pose/TF, and all sensor observations), reusing
+This is the backend's file frontend -- it records optional occupancy grid,
+3D scene, static TF, per-event pose/TF, and all sensor observations, reusing
 the existing McapExporter and export_helper.
 """
 import os
+import logging
 
 import numpy as np
 import yaml
 
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
+from src.robot_config import ConfigError
+from src.runtime_config import McapExportConfig
 from src.utils.export import McapExporter
 from src.utils.coords import habitat_to_ros_pose, habitat_to_ros_obb, convert_occupancy_grid_to_ros
 from src.sensors.export_helper import export_sensor_data
+
+logger = logging.getLogger(__name__)
 
 
 def _sidecar_path(mcap_path: str, suffix: str) -> str:
@@ -54,7 +59,7 @@ def write_sidecar_yaml(path: str, payload: dict) -> None:
 
 
 class McapSink(StreamSink):
-    """Writes pose, TF, scene, occupancy grid, and sensor data to MCAP."""
+    """Writes pose, TF, scene, optional occupancy grid, and sensor data to MCAP."""
 
     def __init__(self, mcap_path: str, config: dict):
         self.mcap_path = mcap_path
@@ -65,6 +70,7 @@ class McapSink(StreamSink):
     def on_start(self, ctx: StreamContext) -> None:
         self.exporter = McapExporter(self.mcap_path, self.config)
         self.exporter.start()
+        export_config = McapExportConfig.from_config(self.config)
 
         # Dynamic per-sensor channels (camera/imu use channel_key=sensor.name).
         for sensor in ctx.sensors:
@@ -107,14 +113,26 @@ class McapSink(StreamSink):
             "camera_link",
         )
 
-        # Latched 2D occupancy grid (/map).
-        origin_pose_ros, ros_map_data = convert_occupancy_grid_to_ros(ctx.occ_grid)
-        self.exporter.write_occupancy_grid(
-            timestamp_ns=0, frame_id="map",
-            resolution=ctx.occ_grid.resolution,
-            width=ctx.occ_grid.width, height=ctx.occ_grid.height,
-            origin_pose=origin_pose_ros, grid_data=ros_map_data,
-        )
+        # Latched 2D occupancy grid (/map), when a global planner produced one.
+        if export_config.export_map:
+            if ctx.occ_grid is None:
+                logger.warning(
+                    "mcap_export.export_map is true but no occupancy grid artifact "
+                    "is available; skipping /map export."
+                )
+            else:
+                if "occupancy_grid" not in export_config.channels:
+                    raise ConfigError(
+                        "mcap_export.export_map is true but "
+                        "mcap_export.channels.occupancy_grid is missing."
+                    )
+                origin_pose_ros, ros_map_data = convert_occupancy_grid_to_ros(ctx.occ_grid)
+                self.exporter.write_occupancy_grid(
+                    timestamp_ns=0, frame_id="map",
+                    resolution=ctx.occ_grid.resolution,
+                    width=ctx.occ_grid.width, height=ctx.occ_grid.height,
+                    origin_pose=origin_pose_ros, grid_data=ros_map_data,
+                )
 
         # Latched 3D scene (/map_3d).
         if ctx.scene_markers:

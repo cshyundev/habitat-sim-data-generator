@@ -19,21 +19,24 @@ raycasting:
   dynamic: false        # (gpu) refresh moved-object transforms each frame
   leaf_size: 8          # (gpu) BVH leaf size
 
-# Global coverage planner (coarse zigzag waypoints)
+# Planner selection and type-specific parameters.
 planner:
-  type: "zigzag"
-  resolution: 0.05 # m / pixel
-  wall_distance: 0.3
-  zigzag_spacing: 0.6
-  sweep_direction: "horizontal"
-  # NOTE: robot height/radius now live in robot.body (single source), not here.
-
-# Local planner (differential-drive RTR, produces timed MotionState)
-local_planner:
-  linear_velocity: 0.3       # m/s
-  linear_acceleration: 0.5   # m/s^2
-  angular_velocity: 1.0      # rad/s
-  angular_acceleration: 2.0  # rad/s^2
+  global:
+    type: "zigzag"
+    params:
+      resolution: 0.05 # m / pixel
+      wall_distance: 0.3
+      zigzag_spacing: 0.6
+      sweep_direction: "horizontal"
+      start_corner: "bottom_left"
+      # NOTE: robot height/radius now live in robot.body (single source), not here.
+  local:
+    type: "differential_drive"
+    params:
+      linear_velocity: 0.3       # m/s
+      linear_acceleration: 0.5   # m/s^2
+      angular_velocity: 1.0      # rad/s
+      angular_acceleration: 2.0  # rad/s^2
 
 # Robot URDF-like Definition
 robot:
@@ -76,6 +79,7 @@ detections:
 # name, with topic/schema sourced from robot.sensors (config/sensors.yaml).
 # Only the pipeline-level (non-sensor) channels are static config.
 mcap_export:
+  export_map: true
   channels:
     pose:
       topic: "/pose"

@@ -11,7 +11,8 @@ from mcap.reader import make_reader
 from mcap_ros2.decoder import DecoderFactory
 
 from src.utils.export import McapExporter
-from src.pipeline.mcap_sink import collect_camera_calibrations, write_sidecar_yaml, _sidecar_path
+from src.pipeline.mcap_sink import McapSink, collect_camera_calibrations, write_sidecar_yaml, _sidecar_path
+from src.pipeline.sink import StreamContext
 from src.datatypes.pose import Pose3D
 from src.datatypes.point_cloud import PointCloud
 from src.datatypes.laser_scan import LaserScan
@@ -185,6 +186,13 @@ class _FakeImu:
     sensor_type = "imu"
 
 
+class _FakeTFManager:
+    links = {}
+
+    def get_relative_pose(self, from_frame, to_frame):
+        raise AssertionError("No TF links should be requested in this test.")
+
+
 class TestMcapSidecars(unittest.TestCase):
     def test_camera_calibration_sidecar_is_yaml_safe(self):
         data = collect_camera_calibrations([_FakeCamera(), _FakeImu()])
@@ -200,6 +208,29 @@ class TestMcapSidecars(unittest.TestCase):
             with open(sidecar) as f:
                 loaded = yaml.safe_load(f)
         self.assertEqual(loaded["semantic_categories"], {1: "chair"})
+
+
+class TestMcapSinkMapExport(unittest.TestCase):
+    def test_export_map_true_without_occ_grid_warns_and_skips(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "sample.mcap")
+            sink = McapSink(path, {"mcap_export": {"export_map": True, "channels": {}}})
+            ctx = StreamContext(
+                config={},
+                occ_grid=None,
+                scene_markers=[],
+                tf_manager=_FakeTFManager(),
+                sensors=[],
+                category_names={},
+            )
+
+            with self.assertLogs("src.pipeline.mcap_sink", level="WARNING"):
+                sink.on_start(ctx)
+            sink.on_finish()
+
+            with open(path, "rb") as f:
+                summary = make_reader(f).get_summary()
+            self.assertEqual(summary.channels, {})
 
 
 if __name__ == "__main__":

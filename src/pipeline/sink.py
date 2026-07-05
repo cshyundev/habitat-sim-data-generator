@@ -28,7 +28,7 @@ class TFProvider(Protocol):
 class StreamContext:
     """One-time context handed to each sink at the start of a run."""
     config: dict
-    occ_grid: OccupancyGrid2D
+    occ_grid: Optional[OccupancyGrid2D]
     scene_markers: List[dict]
     tf_manager: TFProvider
     sensors: List[BaseSensor]

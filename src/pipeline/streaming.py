@@ -20,12 +20,8 @@ from src.raycasting import extract_scene_model
 from src.robot_config import ConfigError
 from src.runtime_config import RaycastingConfig, max_duration_ns_from_config
 from src.sensors.camera.camera import CameraSensor
-from src.planners.map_converter import generate_occupancy_grid_from_sim
-from src.planners.global_planning import ZigzagCoveragePlanner, ZigzagCoverageParams
-from src.planners.local_planning import (
-    DifferentialDriveLocalPlanner,
-    DifferentialDriveParams,
-)
+from src.planners.local_planning import BaseLocalPlanner
+from src.planners.registry import create_global_planner, create_local_planner
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +103,7 @@ class StreamingPipeline:
         config: dict,
         sim: habitat_sim.Simulator,
         sensor_suite: SensorSuite,
-        planner: DifferentialDriveLocalPlanner,
+        planner: BaseLocalPlanner,
         occ_grid,
         scene_markers: List[dict],
         duration_ns: int,
@@ -193,31 +189,22 @@ def build_pipeline(
     sensor_suite: SensorSuite,
 ) -> StreamingPipeline:
     """
-    Builds the occupancy grid, global waypoints, local trajectory, and scene
+    Builds global waypoints, optional planner artifacts, local trajectory, and scene
     markers, returning a ready-to-run StreamingPipeline.
 
     Raises:
         RuntimeError: if the global planner produced no waypoints.
     """
-    cov_params = ZigzagCoverageParams.from_config(config)
-    occ_grid = generate_occupancy_grid_from_sim(
-        sim=sim,
-        resolution=cov_params.resolution,
-        obstacle_radius_m=cov_params.wall_distance,
-    )
-
     start_pose = _agent_start_pose(sim)
-    height_offset = float(start_pose.position[1])
 
-    global_planner = ZigzagCoveragePlanner(cov_params)
-    waypoints = global_planner.plan_from_map(
-        occ_grid, start_pose=start_pose, height_offset=height_offset
-    )
+    global_planner = create_global_planner(config)
+    planning = global_planner.plan(sim, start_pose=start_pose)
+    waypoints = planning.waypoints
+    occ_grid = (planning.artifacts or {}).get("occ_grid")
     if not waypoints:
         raise RuntimeError("Global planner produced no waypoints; cannot stream.")
 
-    local_params = DifferentialDriveParams.from_config(config)
-    planner = DifferentialDriveLocalPlanner(local_params)
+    planner = create_local_planner(config)
     planner.set_waypoints(waypoints, start_pose=start_pose)
 
     duration_ns = planner.duration_ns

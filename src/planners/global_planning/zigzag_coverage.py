@@ -7,7 +7,7 @@ from src.datatypes.pose import Pose3D
 from src.datatypes.waypoint import Waypoint
 from src.datatypes.map import OccupancyGrid2D, GRID_2D_FREE
 from src.planners.map_converter import generate_occupancy_grid_from_sim
-from src.planners.global_planning.base import BaseGlobalPlanner
+from src.planners.global_planning.base import BaseGlobalPlanner, PlanningResult
 from src.planners.global_planning.params import ZigzagCoverageParams
 from src.planners.global_planning import bcd
 
@@ -31,7 +31,7 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
         sim: habitat_sim.Simulator,
         start_pose: Optional[Pose3D] = None,
         **kwargs
-    ) -> List[Waypoint]:
+    ) -> PlanningResult:
         """
         Builds a 2D occupancy grid from the simulator and plans coarse waypoints.
 
@@ -41,7 +41,7 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
             **kwargs: Optional per-call overrides of params fields.
 
         Returns:
-            List of Waypoint objects (orientation unset).
+            PlanningResult with Waypoints and an ``occ_grid`` artifact.
         """
         p = self.params
         occ_grid = generate_occupancy_grid_from_sim(
@@ -64,7 +64,10 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
                     logger.debug("Could not read agent height from simulator: %s", exc)
                     height_offset = 0.0
 
-        return self.plan_from_map(occ_grid, start_pose, height_offset=height_offset, **kwargs)
+        waypoints = self.plan_from_map(
+            occ_grid, start_pose, height_offset=height_offset, **kwargs
+        )
+        return PlanningResult(waypoints=waypoints, artifacts={"occ_grid": occ_grid})
 
     def plan_from_map(
         self,

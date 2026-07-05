@@ -27,6 +27,7 @@ class ChannelConfig:
 @dataclass(frozen=True)
 class McapExportConfig:
     channels: Dict[str, ChannelConfig]
+    export_map: bool = False
 
     @classmethod
     def from_config(cls, config: dict) -> "McapExportConfig":
@@ -35,11 +36,14 @@ class McapExportConfig:
             return cls(channels={})
         if not isinstance(section, dict):
             raise ConfigError("mcap_export: must be a mapping.")
-        _unknown_keys(section, {"channels"}, "mcap_export")
+        _unknown_keys(section, {"channels", "export_map"}, "mcap_export")
 
         raw_channels = section.get("channels", {})
         if not isinstance(raw_channels, dict):
             raise ConfigError("mcap_export.channels: must be a mapping.")
+        raw_export_map = section.get("export_map", False)
+        if not isinstance(raw_export_map, bool):
+            raise ConfigError("mcap_export.export_map: must be a boolean.")
 
         channels: Dict[str, ChannelConfig] = {}
         for key, val in raw_channels.items():
@@ -50,7 +54,36 @@ class McapExportConfig:
                 topic=_nonempty_str(val.get("topic"), f"mcap_export.channels.{key}.topic"),
                 schema=_nonempty_str(val.get("schema"), f"mcap_export.channels.{key}.schema"),
             )
-        return cls(channels=channels)
+        return cls(channels=channels, export_map=raw_export_map)
+
+
+@dataclass(frozen=True)
+class PlannerConfig:
+    global_type: str
+    local_type: str
+
+    @classmethod
+    def from_config(cls, config: dict) -> "PlannerConfig":
+        from src.planners.registry import (
+            available_global_planners,
+            available_local_planners,
+            global_planner_type,
+            local_planner_type,
+        )
+
+        global_type = global_planner_type(config)
+        local_type = local_planner_type(config)
+        if global_type not in available_global_planners():
+            raise ConfigError(
+                f"planner.global.type: unknown '{global_type}'. "
+                f"Available: {list(available_global_planners())}"
+            )
+        if local_type not in available_local_planners():
+            raise ConfigError(
+                f"planner.local.type: unknown '{local_type}'. "
+                f"Available: {list(available_local_planners())}"
+            )
+        return cls(global_type=global_type, local_type=local_type)
 
 
 @dataclass(frozen=True)
@@ -94,6 +127,7 @@ class RuntimeConfig:
     output_dir: str
     output_filename: str
     max_duration_sec: Optional[float]
+    planner: PlannerConfig
     raycasting: RaycastingConfig
     mcap_export: McapExportConfig
 
@@ -128,6 +162,7 @@ class RuntimeConfig:
             output_dir=_nonempty_str(config.get("output_dir"), "output_dir"),
             output_filename=_nonempty_str(config.get("output_filename"), "output_filename"),
             max_duration_sec=max_duration,
+            planner=PlannerConfig.from_config(config),
             raycasting=RaycastingConfig.from_config(config),
             mcap_export=McapExportConfig.from_config(config),
         )

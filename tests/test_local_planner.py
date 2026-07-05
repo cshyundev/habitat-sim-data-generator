@@ -184,7 +184,27 @@ class TestDifferentialDriveLocalPlanner(unittest.TestCase):
 
 
 class TestDifferentialDriveParams(unittest.TestCase):
-    def test_from_config_local_planner_section(self):
+    def test_from_config_new_local_planner_section(self):
+        config = {
+            "planner": {
+                "local": {
+                    "type": "differential_drive",
+                    "params": {
+                        "linear_velocity": 0.4,
+                        "linear_acceleration": 0.8,
+                        "angular_velocity": 1.5,
+                        "angular_acceleration": 3.0,
+                    },
+                },
+            },
+        }
+        params = DifferentialDriveParams.from_config(config)
+        self.assertEqual(params.linear_velocity, 0.4)
+        self.assertEqual(params.linear_acceleration, 0.8)
+        self.assertEqual(params.angular_velocity, 1.5)
+        self.assertEqual(params.angular_acceleration, 3.0)
+
+    def test_from_config_legacy_local_planner_section(self):
         config = {
             "local_planner": {
                 "linear_velocity": 0.4,

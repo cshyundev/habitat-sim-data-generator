@@ -1,8 +1,17 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import List
 import habitat_sim
 
 from src.datatypes.waypoint import Waypoint
+
+
+@dataclass
+class PlanningResult:
+    """Global-planner output plus optional artifacts for sinks/exporters."""
+
+    waypoints: List[Waypoint]
+    artifacts: dict = field(default_factory=dict)
 
 
 class BaseGlobalPlanner(ABC):
@@ -19,7 +28,7 @@ class BaseGlobalPlanner(ABC):
     concrete subclass (via its params / kwargs), not this interface.
     """
     @abstractmethod
-    def plan(self, sim: habitat_sim.Simulator, **kwargs) -> List[Waypoint]:
+    def plan(self, sim: habitat_sim.Simulator, **kwargs) -> PlanningResult:
         """
         Generates a sequence of coarse Waypoints.
 
@@ -28,6 +37,6 @@ class BaseGlobalPlanner(ABC):
             **kwargs: Planner-specific configuration parameters.
 
         Returns:
-            A list of Waypoint objects representing the coarse global path.
+            PlanningResult containing coarse Waypoints plus optional artifacts.
         """
         pass

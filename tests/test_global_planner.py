@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 import numpy as np
 
 from src.datatypes.pose import Pose3D
@@ -6,6 +7,7 @@ from src.datatypes.waypoint import Waypoint
 from src.datatypes.map import OccupancyGrid2D, GRID_2D_FREE, GRID_2D_OCCUPIED
 from src.planners.global_planning import (
     BaseGlobalPlanner,
+    PlanningResult,
     ZigzagCoveragePlanner,
     ZigzagCoverageParams,
 )
@@ -79,6 +81,23 @@ class TestGlobalPlanner(unittest.TestCase):
                 f"Waypoint {wp.position.tolist()} maps outside map bounds ({col}, {row}).",
             )
 
+    def test_plan_returns_result_with_occ_grid_artifact(self):
+        planner = ZigzagCoveragePlanner()
+        with patch(
+            "src.planners.global_planning.zigzag_coverage.generate_occupancy_grid_from_sim",
+            return_value=self.occ_grid,
+        ):
+            result = planner.plan(
+                sim=object(),
+                start_pose=Pose3D(
+                    position=np.array([0.0, 0.5, 0.0], dtype=np.float32),
+                    orientation=np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32),
+                ),
+            )
+        self.assertIsInstance(result, PlanningResult)
+        self.assertIs(result.artifacts["occ_grid"], self.occ_grid)
+        self.assertGreaterEqual(len(result.waypoints), 2)
+
     def test_waypoints_are_coarse(self):
         """Coarse turn points: far fewer waypoints than free grid cells."""
         planner = ZigzagCoveragePlanner()
@@ -94,11 +113,16 @@ class TestGlobalPlanner(unittest.TestCase):
     def test_params_from_config(self):
         config = {
             "planner": {
-                "resolution": 0.1,
-                "wall_distance": 0.25,
-                "zigzag_spacing": 0.7,
-                "sweep_direction": "vertical",
-                "start_corner": "top_left",
+                "global": {
+                    "type": "zigzag",
+                    "params": {
+                        "resolution": 0.1,
+                        "wall_distance": 0.25,
+                        "zigzag_spacing": 0.7,
+                        "sweep_direction": "vertical",
+                        "start_corner": "top_left",
+                    },
+                },
             },
         }
         params = ZigzagCoverageParams.from_config(config)
@@ -114,6 +138,19 @@ class TestGlobalPlanner(unittest.TestCase):
         self.assertNotIn("linear_step", d)
         self.assertNotIn("angular_step", d)
         self.assertNotIn("step_dt_ns", d)
+
+    def test_legacy_params_from_config(self):
+        config = {
+            "planner": {
+                "resolution": 0.11,
+                "wall_distance": 0.22,
+                "zigzag_spacing": 0.66,
+            },
+        }
+        params = ZigzagCoverageParams.from_config(config)
+        self.assertEqual(params.resolution, 0.11)
+        self.assertEqual(params.wall_distance, 0.22)
+        self.assertEqual(params.zigzag_spacing, 0.66)
 
 
 if __name__ == "__main__":
