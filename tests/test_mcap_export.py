@@ -217,10 +217,10 @@ class TestMcapSinkMapExport(unittest.TestCase):
             sink = McapSink(path, {"mcap_export": {"export_map": True, "channels": {}}})
             ctx = StreamContext(
                 config={},
-                occ_grid=None,
                 scene_markers=[],
                 tf_manager=_FakeTFManager(),
                 sensors=[],
+                artifacts={},
                 category_names={},
             )
 

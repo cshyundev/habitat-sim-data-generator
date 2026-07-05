@@ -20,6 +20,7 @@ from src.raycasting import extract_scene_model
 from src.robot_config import ConfigError
 from src.runtime_config import RaycastingConfig, max_duration_ns_from_config
 from src.sensors.camera.camera import CameraSensor
+from src.planners.global_planning import BaseGlobalPlanner
 from src.planners.local_planning import BaseLocalPlanner
 from src.planners.registry import create_global_planner, create_local_planner
 
@@ -103,23 +104,41 @@ class StreamingPipeline:
         config: dict,
         sim: habitat_sim.Simulator,
         sensor_suite: SensorSuite,
-        planner: BaseLocalPlanner,
-        occ_grid,
+        global_planner: BaseGlobalPlanner,
+        local_planner: BaseLocalPlanner,
         scene_markers: List[dict],
-        duration_ns: int,
         detectors=None,
         category_names=None,
     ):
         self.config = config
         self.sim = sim
         self.sensor_suite = sensor_suite
-        self.planner = planner
-        self.occ_grid = occ_grid
+        self.global_planner = global_planner
+        self.local_planner = local_planner
+        self.artifacts = {}
         self.scene_markers = scene_markers
-        self.duration_ns = duration_ns
+        self.duration_ns = 0
         # List of (key, extractor, camera); each runs when its camera fires.
         self.detectors = detectors or []
         self.category_names = category_names or {}
+        self._plan_trajectory()
+
+    def _plan_trajectory(self) -> None:
+        """Runs the configured global planner and seeds the local planner."""
+        start_pose = _agent_start_pose(self.sim)
+        planning = self.global_planner.plan(self.sim, start_pose=start_pose)
+        waypoints = planning.waypoints
+        if not waypoints:
+            raise RuntimeError("Global planner produced no waypoints; cannot stream.")
+
+        self.artifacts = planning.artifacts or {}
+        self.local_planner.set_waypoints(waypoints, start_pose=start_pose)
+
+        duration_ns = self.local_planner.duration_ns
+        max_duration_ns = max_duration_ns_from_config(self.config)
+        if max_duration_ns is not None:
+            duration_ns = min(duration_ns, max_duration_ns)
+        self.duration_ns = duration_ns
 
     def run(self, sinks: List[StreamSink]) -> int:
         """
@@ -129,10 +148,10 @@ class StreamingPipeline:
         """
         ctx = StreamContext(
             config=self.config,
-            occ_grid=self.occ_grid,
             scene_markers=self.scene_markers,
             tf_manager=self.sensor_suite.tf_manager,
             sensors=self.sensor_suite.sensors,
+            artifacts=self.artifacts,
             category_names=self.category_names,
         )
 
@@ -150,7 +169,7 @@ class StreamingPipeline:
                 if t > self.duration_ns:
                     break
 
-                motion_state = self.planner.update(t)
+                motion_state = self.local_planner.update(t)
                 self.sim.get_agent(0).set_state(pose_to_agent_state(motion_state.pose))
                 observations = self.sensor_suite.observe(firing, self.sim, motion_state)
 
@@ -189,28 +208,14 @@ def build_pipeline(
     sensor_suite: SensorSuite,
 ) -> StreamingPipeline:
     """
-    Builds global waypoints, optional planner artifacts, local trajectory, and scene
-    markers, returning a ready-to-run StreamingPipeline.
+    Wires configured planners, scene context, and detector jobs into a ready-to-run
+    StreamingPipeline.
 
     Raises:
         RuntimeError: if the global planner produced no waypoints.
     """
-    start_pose = _agent_start_pose(sim)
-
     global_planner = create_global_planner(config)
-    planning = global_planner.plan(sim, start_pose=start_pose)
-    waypoints = planning.waypoints
-    occ_grid = (planning.artifacts or {}).get("occ_grid")
-    if not waypoints:
-        raise RuntimeError("Global planner produced no waypoints; cannot stream.")
-
-    planner = create_local_planner(config)
-    planner.set_waypoints(waypoints, start_pose=start_pose)
-
-    duration_ns = planner.duration_ns
-    max_duration_ns = max_duration_ns_from_config(config)
-    if max_duration_ns is not None:
-        duration_ns = min(duration_ns, max_duration_ns)
+    local_planner = create_local_planner(config)
 
     scene_markers = extract_visual_map_as_markers(sim, config)
     categories = build_category_names(sim)
@@ -220,10 +225,9 @@ def build_pipeline(
         config=config,
         sim=sim,
         sensor_suite=sensor_suite,
-        planner=planner,
-        occ_grid=occ_grid,
+        global_planner=global_planner,
+        local_planner=local_planner,
         scene_markers=scene_markers,
-        duration_ns=duration_ns,
         detectors=detectors,
         category_names=categories,
     )

@@ -115,7 +115,8 @@ class McapSink(StreamSink):
 
         # Latched 2D occupancy grid (/map), when a global planner produced one.
         if export_config.export_map:
-            if ctx.occ_grid is None:
+            occ_grid = ctx.artifacts.get("occ_grid")
+            if occ_grid is None:
                 logger.warning(
                     "mcap_export.export_map is true but no occupancy grid artifact "
                     "is available; skipping /map export."
@@ -126,11 +127,11 @@ class McapSink(StreamSink):
                         "mcap_export.export_map is true but "
                         "mcap_export.channels.occupancy_grid is missing."
                     )
-                origin_pose_ros, ros_map_data = convert_occupancy_grid_to_ros(ctx.occ_grid)
+                origin_pose_ros, ros_map_data = convert_occupancy_grid_to_ros(occ_grid)
                 self.exporter.write_occupancy_grid(
                     timestamp_ns=0, frame_id="map",
-                    resolution=ctx.occ_grid.resolution,
-                    width=ctx.occ_grid.width, height=ctx.occ_grid.height,
+                    resolution=occ_grid.resolution,
+                    width=occ_grid.width, height=occ_grid.height,
                     origin_pose=origin_pose_ros, grid_data=ros_map_data,
                 )
 

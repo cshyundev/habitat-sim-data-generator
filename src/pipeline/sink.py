@@ -7,10 +7,9 @@ file, the visualization sink renders a subset live). This fan-out keeps the
 backend (data generation) and frontends (export, visualization) decoupled.
 """
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol
 
-from src.datatypes.map import OccupancyGrid2D
 from src.datatypes.motion_state import MotionState
 from src.datatypes.observation import SensorObservation
 from src.datatypes.pose import Pose3D
@@ -28,10 +27,10 @@ class TFProvider(Protocol):
 class StreamContext:
     """One-time context handed to each sink at the start of a run."""
     config: dict
-    occ_grid: Optional[OccupancyGrid2D]
     scene_markers: List[dict]
     tf_manager: TFProvider
     sensors: List[BaseSensor]
+    artifacts: Dict[str, Any] = field(default_factory=dict)
     category_names: Optional[Dict[int, str]] = None
 
 
