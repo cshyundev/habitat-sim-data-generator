@@ -1,9 +1,9 @@
 import logging
 import numpy as np
-from scipy.spatial.transform import Rotation
 # pyrefly: ignore [missing-import]
 from src.datatypes.pose import Pose3D
 from src.datatypes.bbox import OBB3D
+from src.utils.geometry import matrix_to_quaternion, quaternion_to_matrix, rpy_to_matrix
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +24,9 @@ def habitat_to_ros_obb(obb: OBB3D) -> OBB3D:
     unaffected by this world-frame change of basis; only ``center`` and
     ``quat_xyzw`` change. Sets ``frame="map"`` on the result.
     """
-    R_ros = _R_HAB_TO_ROS @ Rotation.from_quat(np.asarray(obb.quat_xyzw, dtype=np.float64)).as_matrix()
+    R_ros = _R_HAB_TO_ROS @ quaternion_to_matrix(obb.quat_xyzw)
     center_ros = _R_HAB_TO_ROS @ np.asarray(obb.center, dtype=np.float64)
-    quat_ros = Rotation.from_matrix(R_ros).as_quat()
+    quat_ros = matrix_to_quaternion(R_ros)
     return OBB3D(
         instance_id=obb.instance_id,
         class_id=obb.class_id,
@@ -131,30 +131,6 @@ def convert_occupancy_grid_to_ros(occ_grid):
     origin_pose_ros = Pose3D(pos_ros, q_ros)
     
     return origin_pose_ros, ros_map_data_flipped
-
-
-def rpy_to_matrix(rpy):
-    """
-    Converts roll, pitch, yaw to a 3x3 rotation matrix.
-    Uses extrinsic/fixed axes (R = Rz(yaw) @ Ry(pitch) @ Rx(roll)), which matches URDF convention.
-    """
-    r, p, y = rpy
-    Rx = np.array([
-        [1, 0, 0],
-        [0, np.cos(r), -np.sin(r)],
-        [0, np.sin(r), np.cos(r)]
-    ], dtype=np.float64)
-    Ry = np.array([
-        [np.cos(p), 0, np.sin(p)],
-        [0, 1, 0],
-        [-np.sin(p), 0, np.cos(p)]
-    ], dtype=np.float64)
-    Rz = np.array([
-        [np.cos(y), -np.sin(y), 0],
-        [np.sin(y), np.cos(y), 0],
-        [0, 0, 1]
-    ], dtype=np.float64)
-    return Rz @ Ry @ Rx
 
 
 def parse_urdf_visuals(urdf_path):

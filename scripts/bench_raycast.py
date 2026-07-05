@@ -36,6 +36,7 @@ from src.robot_config import load_robot
 from src.sensors.suite import SensorSuite
 from src.simulator.factory import create_simulator
 from src.raycasting import extract_scene_model, read_dynamic_transforms, MLXRaycaster
+from src.utils.geometry import yaw_to_matrix
 
 
 # ---------------------------------------------------------------------------
@@ -134,14 +135,9 @@ def sample_poses(sim, lo, hi, n, height, rng):
     return poses
 
 
-def yaw_matrix(yaw):
-    c, s = np.cos(yaw), np.sin(yaw)
-    return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]], dtype=np.float64)
-
-
 def rotate(dirs_local, yaw):
     with np.errstate(all="ignore"):  # silence numpy/Accelerate matmul false positives
-        return dirs_local @ yaw_matrix(yaw).T
+        return dirs_local @ yaw_to_matrix(yaw).T
 
 
 # ---------------------------------------------------------------------------

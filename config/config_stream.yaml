@@ -36,8 +36,8 @@ robot:
   sensors: assets/robots/sensors.yaml
 
   # Ray-casting backend for range/depth/semantic sensors (lidar, depth camera).
-  #   backend: sim  -> habitat-sim sim.cast_ray loop (CPU, original behavior)
-  #   backend: gpu  -> Apple Metal two-level BVH (MLX); much faster for large batches
+  #   backend: gpu  -> Apple Metal two-level BVH (MLX); default production path
+  #   backend: sim  -> habitat-sim sim.cast_ray loop (CPU reference/parity only)
   raycasting:
     backend: gpu          # sim | gpu
     geometry: visual   # (gpu) collision = parity with cast_ray | visual = render mesh

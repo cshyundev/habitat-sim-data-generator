@@ -3,7 +3,6 @@ import numpy as np
 import magnum as mn
 import habitat_sim
 from typing import Any, Optional, Dict, List
-from scipy.spatial.transform import Rotation
 
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.motion_state import MotionState
@@ -21,6 +20,11 @@ from src.sensors.camera.models import (
 )
 from src.sensors.camera.remap import transition_camera_view
 from src.sensors.registry import register_sensor
+from src.utils.geometry import (
+    compose_pose,
+    quaternion_to_habitat_euler,
+    rotate_vectors,
+)
 
 
 # RGB camera models that habitat-sim can rasterize natively (no remap needed).
@@ -116,15 +120,6 @@ class CameraSensor(BaseSensor):
         # a recoverable one -- masking it here would silently mount the sensor
         # at identity and produce plausible-looking but wrong ground truth.
         self.pose = tf_manager.get_relative_pose("base_link", parent_link)
-
-        self.position = mn.Vector3(
-            self.pose.position[0], self.pose.position[1], self.pose.position[2]
-        )
-        # Euler (pitch, yaw, roll) for the native habitat SensorSpec.
-        self.euler = self._quaternion_to_euler(self.pose.orientation)
-        # Offset quaternion for ray-cast world composition (matches IdealLiDAR3D).
-        q = self.pose.orientation
-        self.orientation = mn.Quaternion(mn.Vector3(q[0], q[1], q[2]), q[3])
 
         # Depth representation: pinhole-like -> planar z-depth, wide-angle -> euclidean.
         default_depth = "planar" if self.model in _PINHOLE_LIKE else "euclidean"
@@ -324,18 +319,6 @@ class CameraSensor(BaseSensor):
         })
 
     # ------------------------------------------------------------------
-    # Quaternion helper (unchanged from the original implementation)
-    # ------------------------------------------------------------------
-    def _quaternion_to_euler(self, q_xyzw: np.ndarray) -> mn.Vector3:
-        """Convert quaternion [x, y, z, w] to Euler (pitch, yaw, roll) radians."""
-        roll, pitch, yaw = Rotation.from_quat(q_xyzw).as_euler("xyz")
-        return mn.Vector3(pitch, yaw, roll)
-
-    def _rotate_vectors(self, vectors: np.ndarray, q_xyzw: np.ndarray) -> np.ndarray:
-        """Vectorized rotation of 3D vectors by a quaternion (same as IdealLiDAR3D)."""
-        return Rotation.from_quat(q_xyzw).apply(vectors)
-
-    # ------------------------------------------------------------------
     # BaseSensor interface
     # ------------------------------------------------------------------
     def is_native(self) -> bool:
@@ -370,8 +353,9 @@ class CameraSensor(BaseSensor):
 
         spec.uuid = self.name
         spec.sensor_type = habitat_sim.SensorType.COLOR
-        spec.position = self.position
-        spec.orientation = self.euler
+        p = self.pose.position
+        spec.position = mn.Vector3(float(p[0]), float(p[1]), float(p[2]))
+        spec.orientation = mn.Vector3(*quaternion_to_habitat_euler(self.pose.orientation))
         return spec
 
     def get_observation(
@@ -417,37 +401,24 @@ class CameraSensor(BaseSensor):
         """
         agent_pos = np.asarray(motion_state.position, dtype=np.float64)
         q_agent_xyzw = np.asarray(motion_state.orientation, dtype=np.float64)
-        q_agent_mn = mn.Quaternion(
-            mn.Vector3(
-                float(q_agent_xyzw[0]),
-                float(q_agent_xyzw[1]),
-                float(q_agent_xyzw[2]),
-            ),
-            float(q_agent_xyzw[3]),
-        )
-        sensor_pos_local = np.array([self.position.x, self.position.y, self.position.z])
-        sensor_pos_global = (
-            agent_pos
-            + self._rotate_vectors(sensor_pos_local[np.newaxis, :], q_agent_xyzw)[0]
-        )
-        q_sensor_global = q_agent_mn * self.orientation
-        q_sensor_global_xyzw = np.array(
-            [
-                q_sensor_global.vector.x,
-                q_sensor_global.vector.y,
-                q_sensor_global.vector.z,
-                q_sensor_global.scalar,
-            ]
+        sensor_pos_global, q_sensor_global_xyzw = compose_pose(
+            agent_pos,
+            q_agent_xyzw,
+            self.pose.position,
+            self.pose.orientation,
         )
         return sensor_pos_global, q_sensor_global_xyzw
 
     def _cast(self, sim: habitat_sim.Simulator, motion_state: MotionState):
         """Ray-cast the scene from this camera. Returns ``(RaycastResult, hit_mask[H*W])``."""
+        if self.raycaster is None:
+            raise RuntimeError("Camera raycast outputs require a RayCaster; no sim.cast_ray fallback is created.")
+
         sensor_pos_global, q_sensor_global_xyzw = self.world_pose(motion_state)
 
         # Rotate all local rays into the world frame; give invalid pixels (outside the
         # model FOV) a placeholder direction so the batch is well-defined (masked out).
-        dirs = self._rotate_vectors(self._ray_dirs_local, q_sensor_global_xyzw).copy()
+        dirs = rotate_vectors(self._ray_dirs_local, q_sensor_global_xyzw).copy()
         invalid = ~self._ray_valid
         if np.any(invalid):
             dirs[invalid] = (0.0, 0.0, -1.0)

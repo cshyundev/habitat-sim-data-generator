@@ -10,13 +10,13 @@ Config schema (``robot.raycasting`` in ``config_stream.yaml``; top-level
 ``raycasting`` is still accepted)::
 
     raycasting:
-      backend: sim          # sim | gpu (alias: mlx)
+      backend: gpu          # gpu | mlx | sim
       geometry: collision   # (gpu) collision | visual
       dynamic: false        # (gpu) refresh moved-object transforms each frame
       leaf_size: 8          # (gpu) BVH leaf size
 
-Defaults to the ``sim`` backend (identical to the original ``sim.cast_ray`` path),
-so a missing/empty config behaves exactly as before.
+Defaults to the GPU backend. The ``sim`` backend remains available only when
+explicitly configured for reference/parity work.
 """
 
 from __future__ import annotations

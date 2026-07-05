@@ -1,11 +1,8 @@
 import abc
 import numpy as np
 # pyrefly: ignore [missing-import]
-import magnum as mn
-# pyrefly: ignore [missing-import]
 import habitat_sim
 from typing import Optional, Any, Dict
-from scipy.spatial.transform import Rotation
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.motion_state import MotionState
 
@@ -49,9 +46,6 @@ class LiDAR3D(BaseSensor, abc.ABC):
         # at identity and produce plausible-looking but wrong ground truth.
         self.pose = tf_manager.get_relative_pose("base_link", parent_link)
             
-        self.position = mn.Vector3(self.pose.position[0], self.pose.position[1], self.pose.position[2])
-        self.orientation = mn.Quaternion(mn.Vector3(self.pose.orientation[0], self.pose.orientation[1], self.pose.orientation[2]), self.pose.orientation[3])
-            
         self.min_distance = parameters.get("min_distance", 0.1)
         self.max_distance = parameters.get("max_distance", 100.0)
         
@@ -85,12 +79,6 @@ class LiDAR3D(BaseSensor, abc.ABC):
             A mapping of output name to payload.
         """
         pass
-
-    def _rotate_vectors(self, vectors: np.ndarray, q_xyzw: np.ndarray) -> np.ndarray:
-        """
-        Vectorized rotation of 3D vectors by a quaternion.
-        """
-        return Rotation.from_quat(q_xyzw).apply(vectors)
 
     def to_point_cloud(
         self,

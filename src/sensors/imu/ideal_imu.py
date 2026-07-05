@@ -7,29 +7,11 @@ from src.datatypes.pose import Pose3D
 from src.datatypes.motion_state import MotionState
 from src.datatypes.imu import Imu
 from src.sensors.registry import register_sensor
+from src.utils.geometry import quaternion_to_matrix
 
 
 def _identity_pose() -> Pose3D:
     return Pose3D(np.zeros(3, dtype=np.float32), np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32))
-
-
-def _rotation_matrix(q_xyzw: np.ndarray) -> np.ndarray:
-    x, y, z, w = np.asarray(q_xyzw, dtype=np.float64)
-    n = x * x + y * y + z * z + w * w
-    if n == 0.0:
-        return np.eye(3, dtype=np.float64)
-    s = 2.0 / n
-    xx, yy, zz = x * x * s, y * y * s, z * z * s
-    xy, xz, yz = x * y * s, x * z * s, y * z * s
-    wx, wy, wz = w * x * s, w * y * s, w * z * s
-    return np.array(
-        [
-            [1.0 - yy - zz, xy - wz, xz + wy],
-            [xy + wz, 1.0 - xx - zz, yz - wx],
-            [xz - wy, yz + wx, 1.0 - xx - yy],
-        ],
-        dtype=np.float64,
-    )
 
 
 @register_sensor("imu")
@@ -74,7 +56,7 @@ class IdealIMU(BaseSensor):
             self.pose = _identity_pose()
         else:
             self.pose = tf_manager.get_relative_pose("base_link", parent_link)
-        self._base_R_imu = _rotation_matrix(self.pose.orientation)
+        self._base_R_imu = quaternion_to_matrix(self.pose.orientation)
         self.include_gravity = bool(
             parameters.get("include_gravity", parameters.get("apply_gravity", True))
         )
@@ -119,7 +101,7 @@ class IdealIMU(BaseSensor):
         )
 
         if self.include_gravity:
-            world_R_base = _rotation_matrix(motion_state.orientation)
+            world_R_base = quaternion_to_matrix(motion_state.orientation)
             gravity_world = np.array([0.0, -self.gravity_mps2, 0.0], dtype=np.float64)
             gravity_base = world_R_base.T @ gravity_world
             accel_at_imu = accel_at_imu - gravity_base

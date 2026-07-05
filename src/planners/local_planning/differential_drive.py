@@ -10,6 +10,7 @@ from src.datatypes.motion_state import MotionState
 from src.planners.local_planning.base import BaseLocalPlanner
 from src.planners.local_planning.params import DifferentialDriveParams
 from src.planners.local_planning.profile import TrapezoidalProfile
+from src.utils.geometry import heading_yaw_from_delta, wrap_angle, yaw_to_quaternion
 
 # Yaw threshold below which a rotation primitive is skipped [rad].
 _YAW_EPS = 1e-4
@@ -17,16 +18,6 @@ _YAW_EPS = 1e-4
 _DIST_EPS = 1e-5
 
 _NS_PER_SEC = 1e9
-
-
-def _wrap_angle(angle: float) -> float:
-    """Wraps an angle to (-pi, pi]."""
-    return math.atan2(math.sin(angle), math.cos(angle))
-
-
-def _yaw_to_quat(yaw: float) -> np.ndarray:
-    """Quaternion [x, y, z, w] for a yaw rotation about the +Y axis (Habitat)."""
-    return np.array([0.0, math.sin(yaw / 2.0), 0.0, math.cos(yaw / 2.0)], dtype=np.float32)
 
 
 @dataclass
@@ -104,7 +95,7 @@ class DifferentialDriveLocalPlanner(BaseLocalPlanner):
             current_yaw = float(start_pose.yaw)
         elif len(world_pts) > 1:
             seg = world_pts[1] - world_pts[0]
-            current_yaw = math.atan2(-seg[0], -seg[2])
+            current_yaw = heading_yaw_from_delta(seg)
         else:
             current_yaw = 0.0
         self._home_yaw = current_yaw
@@ -125,10 +116,10 @@ class DifferentialDriveLocalPlanner(BaseLocalPlanner):
             if dist < _DIST_EPS:
                 continue
 
-            target_yaw = math.atan2(-float(seg[0]), -float(seg[2]))
+            target_yaw = heading_yaw_from_delta(seg)
 
             # 1. Rotate-in-place primitive (point turn) to face the segment.
-            diff_yaw = _wrap_angle(target_yaw - current_yaw)
+            diff_yaw = wrap_angle(target_yaw - current_yaw)
             if abs(diff_yaw) > _YAW_EPS:
                 profile = TrapezoidalProfile(abs(diff_yaw), v_ang, a_ang)
                 dur_ns = int(round(profile.duration * _NS_PER_SEC))
@@ -184,7 +175,7 @@ class DifferentialDriveLocalPlanner(BaseLocalPlanner):
 
         if prim.kind == "translate":
             position = prim.position + prim.unit_dir * s
-            orientation = _yaw_to_quat(prim.yaw)
+            orientation = yaw_to_quaternion(prim.yaw)
             # Forward motion lies on the body -Z axis (Habitat agent frame).
             linear_velocity_body = np.array([0.0, 0.0, -v], dtype=np.float32)
             linear_acceleration_body = np.array([0.0, 0.0, -a], dtype=np.float32)
@@ -192,7 +183,7 @@ class DifferentialDriveLocalPlanner(BaseLocalPlanner):
         else:  # rotate
             yaw = prim.start_yaw + prim.sign * s
             position = np.array(prim.position, dtype=np.float32)
-            orientation = _yaw_to_quat(yaw)
+            orientation = yaw_to_quaternion(yaw)
             linear_velocity_body = np.zeros(3, dtype=np.float32)
             linear_acceleration_body = np.zeros(3, dtype=np.float32)
             # Yaw rate about the +Y axis.
@@ -210,7 +201,7 @@ class DifferentialDriveLocalPlanner(BaseLocalPlanner):
     def _rest_state(self, position: np.ndarray, yaw: float, timestamp_ns: int) -> MotionState:
         return MotionState(
             position=np.array(position, dtype=np.float32),
-            orientation=_yaw_to_quat(yaw),
+            orientation=yaw_to_quaternion(yaw),
             timestamp_ns=int(timestamp_ns),
             linear_velocity_body=np.zeros(3, dtype=np.float32),
             angular_velocity_body=np.zeros(3, dtype=np.float32),

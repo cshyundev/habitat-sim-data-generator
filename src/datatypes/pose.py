@@ -1,6 +1,8 @@
-import numpy as np
-import math
 from typing import Optional
+
+import numpy as np
+
+from src.utils.geometry import quaternion_to_yaw
 
 class Pose3D:
     """
@@ -31,10 +33,7 @@ class Pose3D:
         Computes the yaw angle (rotation around vertical Y-axis in Habitat) 
         from the orientation quaternion [x, y, z, w].
         """
-        x, y, z, w = self.orientation
-        # Project forward vector [0, 0, -1] onto X-Z plane: theta = atan2(2(wy - xz), 1 - 2(x^2 + y^2))
-        return math.atan2(2.0 * (w * y - x * z), 1.0 - 2.0 * (x * x + y * y))
+        return quaternion_to_yaw(self.orientation)
 
     def __repr__(self) -> str:
         return f"Pose3D(position={self.position.tolist()}, orientation={self.orientation.tolist()}, timestamp_ns={self.timestamp_ns})"
-

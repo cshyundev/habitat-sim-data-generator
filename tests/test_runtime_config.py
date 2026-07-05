@@ -55,6 +55,12 @@ class TestRuntimeConfigValidation(unittest.TestCase):
         self.assertEqual(cfg.max_duration_sec, 1.0)
         self.assertFalse(cfg.mcap_export.export_map)
 
+    def test_raycasting_defaults_to_gpu(self):
+        cfg = _valid_config()
+        del cfg["robot"]["raycasting"]
+        runtime = validate_runtime_config(cfg)
+        self.assertEqual(runtime.raycasting.backend, "gpu")
+
     def test_legacy_planner_config_validates(self):
         cfg = _valid_config()
         cfg["planner"] = {"type": "zigzag", "resolution": 0.05}

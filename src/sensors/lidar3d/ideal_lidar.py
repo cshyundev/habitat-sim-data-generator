@@ -1,13 +1,12 @@
 import numpy as np
-import magnum as mn
 import habitat_sim
 from typing import Any, Dict, Optional
 # pyrefly: ignore [missing-import]
 from src.sensors.lidar3d.base_lidar import LiDAR3D
-from src.datatypes.pose import Pose3D
 from src.datatypes.motion_state import MotionState
 from src.datatypes.point_cloud import PointCloud
 from src.sensors.registry import register_sensor
+from src.utils.geometry import compose_pose, rotate_vectors
 
 @register_sensor("lidar3d")
 class IdealLiDAR3D(LiDAR3D):
@@ -85,30 +84,24 @@ class IdealLiDAR3D(LiDAR3D):
         Returns:
             PointCloud with points in the lidar sensor frame.
         """
+        if self.raycaster is None:
+            raise RuntimeError("LiDAR3D requires a RayCaster; no sim.cast_ray fallback is created.")
+
         H, W = self.altitude_bins, self.azimuth_bins
 
         agent_pos = np.asarray(motion_state.position, dtype=np.float64)
         # MotionState.orientation is a quaternion [x, y, z, w] (Habitat frame).
         q_agent_xyzw = np.asarray(motion_state.orientation, dtype=np.float64)
-        qx, qy, qz, qw = (float(q_agent_xyzw[0]), float(q_agent_xyzw[1]),
-                          float(q_agent_xyzw[2]), float(q_agent_xyzw[3]))
 
-        sensor_pos_local = np.array([self.position.x, self.position.y, self.position.z])
-
-        q_agent_mn = mn.Quaternion(mn.Vector3(qx, qy, qz), qw)
-        
-        sensor_pos_global = agent_pos + self._rotate_vectors(sensor_pos_local[np.newaxis, :], q_agent_xyzw)[0]
-        
-        q_sensor_global = q_agent_mn * self.orientation
-        q_sensor_global_xyzw = np.array([
-            q_sensor_global.vector.x,
-            q_sensor_global.vector.y,
-            q_sensor_global.vector.z,
-            q_sensor_global.scalar
-        ])
+        sensor_pos_global, q_sensor_global_xyzw = compose_pose(
+            agent_pos,
+            q_agent_xyzw,
+            self.pose.position,
+            self.pose.orientation,
+        )
         
         flat_directions_local = self.ray_directions.reshape(-1, 3)
-        flat_directions_global = self._rotate_vectors(flat_directions_local, q_sensor_global_xyzw)
+        flat_directions_global = rotate_vectors(flat_directions_local, q_sensor_global_xyzw)
 
         # Batched ray cast through the shared backend. Origins are the (single)
         # sensor world position broadcast to every ray.

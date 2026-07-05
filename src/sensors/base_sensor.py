@@ -32,10 +32,9 @@ class BaseSensor(abc.ABC):
             hz: Update frequency of the sensor.
             parameters: Dictionary containing sensor-specific parameters.
             tf_manager: TFManager instance to fetch link transforms.
-            raycaster: Shared ``RayCaster`` used for ray-based sensing. ``None``
-                falls back to a default ``RayCaster()`` (sim backend = ``sim.cast_ray``)
-                so a sensor can be constructed standalone (e.g. in tests). IMU-like
-                sensors ignore it; it is held for interface uniformity.
+            raycaster: Shared ``RayCaster`` used for ray-based sensing. Ray-based
+                sensors require this to be supplied by ``SensorSuite`` or tests.
+                IMU-like sensors ignore it; it is held for interface uniformity.
             output_names/output_params: Generation hints owned by SensorSuite.
                 BaseSensor accepts them for a uniform constructor but does not
                 store export metadata.
@@ -47,9 +46,6 @@ class BaseSensor(abc.ABC):
         self.parameters = parameters
         self.config = config or {}
         self.tf_manager = tf_manager
-        if raycaster is None:
-            from src.raycasting.raycaster import RayCaster
-            raycaster = RayCaster()  # empty config -> sim backend
         self.raycaster = raycaster
 
     @classmethod

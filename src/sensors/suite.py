@@ -29,7 +29,7 @@ class SensorSuite:
         # 1. Initialize TF Manager from the URDF-derived frame tree.
         self.tf_manager = TFManager(robot.frames)
 
-        # 2. Shared ray-caster (selects its backend from config; sim default). One
+        # 2. Shared ray-caster (selects its backend from config; GPU default). One
         #    instance is shared by every sensor so geometry is extracted/built once.
         self.raycaster = RayCaster(config)
         self.config = config

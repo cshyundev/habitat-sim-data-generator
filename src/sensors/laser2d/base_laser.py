@@ -2,9 +2,7 @@ import abc
 from typing import Any, Dict, Optional
 
 import habitat_sim
-import magnum as mn
 import numpy as np
-from scipy.spatial.transform import Rotation
 
 from src.datatypes.motion_state import MotionState
 from src.sensors.base_sensor import BaseSensor
@@ -40,17 +38,6 @@ class Laser2D(BaseSensor, abc.ABC):
         )
         self.uuid = name
         self.pose = tf_manager.get_relative_pose("base_link", parent_link)
-        self.position = mn.Vector3(
-            self.pose.position[0], self.pose.position[1], self.pose.position[2]
-        )
-        self.orientation = mn.Quaternion(
-            mn.Vector3(
-                self.pose.orientation[0],
-                self.pose.orientation[1],
-                self.pose.orientation[2],
-            ),
-            self.pose.orientation[3],
-        )
 
         self.min_distance = float(parameters.get("min_distance", 0.1))
         self.max_distance = float(parameters.get("max_distance", 100.0))
@@ -78,9 +65,6 @@ class Laser2D(BaseSensor, abc.ABC):
     ) -> Dict[str, Any]:
         """Generate a mapping of output name to payload."""
         pass
-
-    def _rotate_vectors(self, vectors: np.ndarray, q_xyzw: np.ndarray) -> np.ndarray:
-        return Rotation.from_quat(q_xyzw).apply(vectors)
 
     def to_point_cloud(self, range_scan: np.ndarray) -> np.ndarray:
         """Convert a 1D range scan to local-frame laser points."""

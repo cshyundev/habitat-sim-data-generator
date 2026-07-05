@@ -1,6 +1,8 @@
-import numpy as np
-import math
 from typing import Optional
+
+import numpy as np
+
+from src.utils.geometry import quaternion_to_yaw
 
 class Waypoint:
     """
@@ -46,8 +48,7 @@ class Waypoint:
         """
         if self.orientation is None:
             return None
-        x, y, z, w = self.orientation
-        return math.atan2(2.0 * (w * y - x * z), 1.0 - 2.0 * (x * x + y * y))
+        return quaternion_to_yaw(self.orientation)
 
     def __repr__(self) -> str:
         ori = None if self.orientation is None else self.orientation.tolist()

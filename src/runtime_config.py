@@ -171,7 +171,7 @@ class PlannerConfig:
 
 @dataclass(frozen=True)
 class RaycastingConfig:
-    backend: str = "sim"
+    backend: str = "gpu"
     geometry: str = "collision"
     dynamic: bool = False
     leaf_size: int = 8
@@ -190,7 +190,7 @@ class RaycastingConfig:
             raise ConfigError("raycasting: must be a mapping.")
         _unknown_keys(section, {"backend", "geometry", "dynamic", "leaf_size"}, "raycasting")
 
-        backend = str(section.get("backend", "sim")).lower()
+        backend = str(section.get("backend", "gpu")).lower()
         if backend not in ("sim", "gpu", "mlx"):
             raise ConfigError("raycasting.backend: expected 'sim', 'gpu', or 'mlx'.")
 

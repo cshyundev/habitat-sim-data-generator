@@ -24,13 +24,13 @@ import xml.etree.ElementTree as ET
 from typing import List, Optional
 
 import numpy as np
-from scipy.spatial.transform import Rotation
 
 from src.utils.coords import (
     ros_to_habitat_position,
     ros_to_habitat_quaternion,
     rpy_to_matrix,
 )
+from src.utils.geometry import rpy_to_quaternion
 
 DEFAULT_HEIGHT = 0.5
 DEFAULT_RADIUS = 0.25
@@ -138,7 +138,7 @@ def urdf_frames(urdf_text: str) -> List[dict]:
         if nm in joints:
             parent, xyz, rpy = joints[nm]
             pos = ros_to_habitat_position(np.asarray(xyz, dtype=np.float64))
-            quat_ros = Rotation.from_matrix(rpy_to_matrix(rpy)).as_quat()  # [x, y, z, w]
+            quat_ros = rpy_to_quaternion(rpy)
             quat = ros_to_habitat_quaternion(np.asarray(quat_ros, dtype=np.float64))
             frames.append(
                 {

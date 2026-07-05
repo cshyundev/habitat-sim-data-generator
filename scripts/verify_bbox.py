@@ -26,18 +26,15 @@ from src.detections import BBox2DExtractor, build_category_names  # noqa: E402
 from src.robot_config import load_robot  # noqa: E402
 from src.sensors.suite import SensorSuite  # noqa: E402
 from src.simulator.factory import create_simulator  # noqa: E402
+from src.utils.geometry import yaw_to_quaternion  # noqa: E402
 from src.utils.habitat import pose_to_agent_state  # noqa: E402
-
-
-def _yaw_quat(yaw_deg: float) -> np.ndarray:
-    """Habitat yaw (about +Y) quaternion [x, y, z, w]."""
-    h = math.radians(yaw_deg) / 2.0
-    return np.array([0.0, math.sin(h), 0.0, math.cos(h)], dtype=np.float32)
 
 
 def _motion_state(pos: np.ndarray, yaw_deg: float) -> MotionState:
     return MotionState(
-        position=pos, orientation=_yaw_quat(yaw_deg), timestamp_ns=0,
+        position=pos,
+        orientation=yaw_to_quaternion(math.radians(yaw_deg)),
+        timestamp_ns=0,
         linear_velocity_body=np.zeros(3), angular_velocity_body=np.zeros(3),
         linear_acceleration_body=np.zeros(3),
     )

@@ -15,7 +15,6 @@ import sys
 
 import numpy as np
 import yaml
-from scipy.spatial.transform import Rotation
 
 import matplotlib
 matplotlib.use("Agg")
@@ -30,6 +29,7 @@ from src.raycasting import extract_scene_model  # noqa: E402
 from src.robot_config import load_robot  # noqa: E402
 from src.sensors.suite import SensorSuite  # noqa: E402
 from src.simulator.factory import create_simulator  # noqa: E402
+from src.utils.geometry import quaternion_to_matrix, yaw_to_quaternion  # noqa: E402
 from src.utils.habitat import pose_to_agent_state  # noqa: E402
 
 # Cube edges: connect corners (indexed by 3 sign bits) that differ in one bit.
@@ -37,13 +37,8 @@ _CORNER_SIGNS = np.array([[sx, sy, sz] for sx in (-1, 1) for sy in (-1, 1) for s
 _EDGES = [(i, i ^ b) for i in range(8) for b in (1, 2, 4) if i < (i ^ b)]
 
 
-def _yaw_quat(yaw_deg):
-    h = math.radians(yaw_deg) / 2.0
-    return np.array([0.0, math.sin(h), 0.0, math.cos(h)], dtype=np.float32)
-
-
 def _motion_state(pos, yaw_deg):
-    return MotionState(pos, _yaw_quat(yaw_deg), 0, np.zeros(3), np.zeros(3), np.zeros(3))
+    return MotionState(pos, yaw_to_quaternion(math.radians(yaw_deg)), 0, np.zeros(3), np.zeros(3), np.zeros(3))
 
 
 def _find(suite, name=None, modality=None):
@@ -66,7 +61,7 @@ def _color_map(id_map):
 
 def _project_obb(cam, obb):
     """Project a camera-local OBB's 8 corners to pixels. Returns (pixels[8,2], in_front[8])."""
-    R = Rotation.from_quat(obb.quat_xyzw).as_matrix()
+    R = quaternion_to_matrix(obb.quat_xyzw)
     corners = obb.center[None, :] + (_CORNER_SIGNS * obb.half_extents) @ R.T  # [8,3] habitat frame
     cv = corners.copy()
     cv[:, 1] *= -1.0  # habitat (Y up, -Z fwd) -> CV (Y down, +Z fwd)

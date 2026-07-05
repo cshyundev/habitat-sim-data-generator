@@ -1,13 +1,13 @@
 from typing import Any, Dict, Optional
 
 import habitat_sim
-import magnum as mn
 import numpy as np
 
 from src.datatypes.laser_scan import LaserScan
 from src.datatypes.motion_state import MotionState
 from src.sensors.laser2d.base_laser import Laser2D
 from src.sensors.registry import register_sensor
+from src.utils.geometry import compose_pose, rotate_vectors
 
 
 @register_sensor("laser2d")
@@ -68,30 +68,20 @@ class IdealLaser2D(Laser2D):
         motion_state: MotionState,
         tf_manager: Any,
     ) -> Dict[str, Any]:
+        if self.raycaster is None:
+            raise RuntimeError("Laser2D requires a RayCaster; no sim.cast_ray fallback is created.")
+
         agent_pos = np.asarray(motion_state.position, dtype=np.float64)
         q_agent_xyzw = np.asarray(motion_state.orientation, dtype=np.float64)
-        qx, qy, qz, qw = (float(q_agent_xyzw[0]), float(q_agent_xyzw[1]),
-                          float(q_agent_xyzw[2]), float(q_agent_xyzw[3]))
 
-        sensor_pos_local = np.array([self.position.x, self.position.y, self.position.z])
-        sensor_pos_global = (
-            agent_pos
-            + self._rotate_vectors(sensor_pos_local[np.newaxis, :], q_agent_xyzw)[0]
+        sensor_pos_global, q_sensor_global_xyzw = compose_pose(
+            agent_pos,
+            q_agent_xyzw,
+            self.pose.position,
+            self.pose.orientation,
         )
 
-        q_agent_mn = mn.Quaternion(mn.Vector3(qx, qy, qz), qw)
-        q_sensor_global = q_agent_mn * self.orientation
-        q_sensor_global_xyzw = np.array(
-            [
-                q_sensor_global.vector.x,
-                q_sensor_global.vector.y,
-                q_sensor_global.vector.z,
-                q_sensor_global.scalar,
-            ],
-            dtype=np.float64,
-        )
-
-        directions_global = self._rotate_vectors(
+        directions_global = rotate_vectors(
             self.ray_directions, q_sensor_global_xyzw
         ).astype(np.float32)
         origins = np.broadcast_to(sensor_pos_global, directions_global.shape)

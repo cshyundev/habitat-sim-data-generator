@@ -9,6 +9,7 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.datatypes.motion_state import MotionState
+from src.raycasting.raycaster import RayCaster
 from src.sensors.lidar3d.ideal_lidar import IdealLiDAR3D
 from src.utils.tf import TFManager
 
@@ -90,6 +91,7 @@ def run_test():
             "altitude_bins": 32,
         },
         tf_manager=tf_manager,
+        raycaster=RayCaster({"raycasting": {"backend": "gpu", "geometry": "visual"}}),
         output_names=["point_cloud"],
     )
 

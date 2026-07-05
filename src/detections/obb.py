@@ -11,10 +11,10 @@ from __future__ import annotations
 from typing import Dict
 
 import numpy as np
-from scipy.spatial.transform import Rotation
 
 from src.detections.categories import name_for
 from src.datatypes.bbox import OBB3D
+from src.utils.geometry import matrix_to_quaternion, quaternion_to_matrix
 
 
 def _object_obb_world(local_verts: np.ndarray, transform: np.ndarray):
@@ -53,7 +53,7 @@ def global_obbs(scene_model, categories: Dict[int, str]) -> Dict[int, OBB3D]:
             class_name=name_for(categories, om.semantic_id),
             center=center_w,
             half_extents=he,
-            quat_xyzw=Rotation.from_matrix(R_w).as_quat(),
+            quat_xyzw=matrix_to_quaternion(R_w),
             frame="world",
         )
     return out
@@ -61,8 +61,8 @@ def global_obbs(scene_model, categories: Dict[int, str]) -> Dict[int, OBB3D]:
 
 def obb_to_camera(obb: OBB3D, cam_pos: np.ndarray, cam_quat_xyzw: np.ndarray) -> OBB3D:
     """Re-express a world-frame OBB in the camera-local frame (rigid transform of its pose)."""
-    R_c = Rotation.from_quat(np.asarray(cam_quat_xyzw, dtype=np.float64)).as_matrix()
-    R_w = Rotation.from_quat(np.asarray(obb.quat_xyzw, dtype=np.float64)).as_matrix()
+    R_c = quaternion_to_matrix(cam_quat_xyzw)
+    R_w = quaternion_to_matrix(obb.quat_xyzw)
     R_cam = R_c.T @ R_w
     center_cam = R_c.T @ (np.asarray(obb.center, dtype=np.float64) - np.asarray(cam_pos, dtype=np.float64))
     return OBB3D(
@@ -71,6 +71,6 @@ def obb_to_camera(obb: OBB3D, cam_pos: np.ndarray, cam_quat_xyzw: np.ndarray) ->
         class_name=obb.class_name,
         center=center_cam,
         half_extents=obb.half_extents,
-        quat_xyzw=Rotation.from_matrix(R_cam).as_quat(),
+        quat_xyzw=matrix_to_quaternion(R_cam),
         frame="camera",
     )

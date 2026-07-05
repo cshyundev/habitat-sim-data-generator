@@ -1,7 +1,7 @@
 import numpy as np
-import magnum as mn
-from typing import Dict, List, Optional
+from typing import Dict, List
 from src.datatypes.pose import Pose3D
+from src.utils.geometry import matrix_to_pose_components, pose_to_matrix
 
 class TFManager:
     """
@@ -20,7 +20,7 @@ class TFManager:
                           - orientation: List[float] of size 4 [x, y, z, w] (quaternion)
         """
         self.links: Dict[str, dict] = {link["name"]: link for link in links_config}
-        self.absolute_transforms: Dict[str, mn.Matrix4] = {}
+        self.absolute_transforms: Dict[str, np.ndarray] = {}
         self._compute_absolute_transforms()
 
     def _compute_absolute_transforms(self):
@@ -28,7 +28,7 @@ class TFManager:
         for link_name in self.links:
             self._get_or_compute_transform(link_name)
 
-    def _get_or_compute_transform(self, link_name: str) -> mn.Matrix4:
+    def _get_or_compute_transform(self, link_name: str) -> np.ndarray:
         """
         Recursive helper to compute and cache absolute transformation of a link.
         """
@@ -39,13 +39,10 @@ class TFManager:
             raise ValueError(f"Link {link_name} is not defined in the configuration.")
 
         link = self.links[link_name]
-        pos = link["position"]
-        rot = link["orientation"] # [x, y, z, w]
-        
-        translation = mn.Vector3(pos[0], pos[1], pos[2])
-        q = mn.Quaternion(mn.Vector3(rot[0], rot[1], rot[2]), rot[3])
-        
-        rel_matrix = mn.Matrix4.from_(q.to_matrix(), translation)
+        pos = np.asarray(link["position"], dtype=np.float64)
+        rot = np.asarray(link["orientation"], dtype=np.float64) # [x, y, z, w]
+
+        rel_matrix = pose_to_matrix(pos, rot)
         
         parent = link.get("parent")
         if parent is None or parent == "":
@@ -77,13 +74,11 @@ class TFManager:
         t_to = self.absolute_transforms[to_frame]
         
         # relative_transform = from_T_world * world_T_to = (world_T_from).inverse() * world_T_to
-        rel_matrix = t_from.inverted() @ t_to
-        
-        translation = rel_matrix.translation
-        rotation = mn.Quaternion.from_matrix(rel_matrix.rotation())
-        
-        pos = np.array([translation.x, translation.y, translation.z], dtype=np.float32)
-        ori = np.array([rotation.vector.x, rotation.vector.y, rotation.vector.z, rotation.scalar], dtype=np.float32)
+        rel_matrix = np.linalg.inv(t_from) @ t_to
+
+        pos, ori = matrix_to_pose_components(rel_matrix)
+        pos = pos.astype(np.float32)
+        ori = ori.astype(np.float32)
         
         return Pose3D(pos, ori)
 
@@ -101,12 +96,8 @@ class TFManager:
             raise ValueError(f"Frame {frame} not found in links.")
             
         t_abs = self.absolute_transforms[frame]
-        translation = t_abs.translation
-        rotation = mn.Quaternion.from_matrix(t_abs.rotation())
-        
-        pos = np.array([translation.x, translation.y, translation.z], dtype=np.float32)
-        ori = np.array([rotation.vector.x, rotation.vector.y, rotation.vector.z, rotation.scalar], dtype=np.float32)
+        pos, ori = matrix_to_pose_components(t_abs)
+        pos = pos.astype(np.float32)
+        ori = ori.astype(np.float32)
         
         return Pose3D(pos, ori)
-
-
