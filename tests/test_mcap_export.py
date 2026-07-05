@@ -11,7 +11,7 @@ from mcap.reader import make_reader
 from mcap_ros2.decoder import DecoderFactory
 
 from src.utils.export import McapExporter
-from src.pipeline.mcap_sink import McapSink, collect_camera_calibrations, write_sidecar_yaml, _sidecar_path
+from src.pipeline.mcap_sink import McapSink, collect_calibrations, write_sidecar_yaml, _sidecar_path
 from src.pipeline.sink import StreamContext
 from src.datatypes.pose import Pose3D
 from src.datatypes.point_cloud import PointCloud
@@ -171,6 +171,8 @@ class TestMcapExportRoundTrip(unittest.TestCase):
 
 class _FakeCamera:
     sensor_type = "camera"
+    name = "cam"
+    parent_link = "camera_link"
 
     def calibration_dict(self):
         return {
@@ -195,10 +197,18 @@ class _FakeTFManager:
 
 class TestMcapSidecars(unittest.TestCase):
     def test_camera_calibration_sidecar_is_yaml_safe(self):
-        data = collect_camera_calibrations([_FakeCamera(), _FakeImu()])
+        channels = {
+            "cam.rgb": {"topic": "/cam/rgb", "schema": "sensor_msgs/msg/Image"},
+            "cam.bbox2d": {
+                "topic": "/cam/bbox2d",
+                "schema": "habitat_msgs/msg/Detection2DArray",
+            },
+        }
+        data = collect_calibrations([_FakeCamera(), _FakeImu()], channels)
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["camera_model"]["image_size"], [640, 480])
         self.assertEqual(data[0]["camera_model"]["dist_coeffs"], [0.1, 0.0, 0.0])
+        self.assertEqual(data[0]["outputs"]["rgb"]["topic"], "/cam/rgb")
 
     def test_write_sidecar_yaml_next_to_mcap(self):
         with tempfile.TemporaryDirectory() as td:
@@ -211,6 +221,42 @@ class TestMcapSidecars(unittest.TestCase):
 
 
 class TestMcapSinkMapExport(unittest.TestCase):
+    def test_registers_sensor_product_channels(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "sample.mcap")
+            sink = McapSink(path, {
+                "mcap_export": {
+                    "channels": {
+                        "cam": {
+                            "rgb": {
+                                "topic": "/cam/rgb",
+                                "schema": "sensor_msgs/msg/Image",
+                            },
+                            "bbox2d": {
+                                "topic": "/cam/bbox2d",
+                                "schema": "habitat_msgs/msg/Detection2DArray",
+                            },
+                        }
+                    },
+                }
+            })
+            ctx = StreamContext(
+                config={},
+                scene_markers=[],
+                tf_manager=_FakeTFManager(),
+                sensors=[_FakeCamera()],
+                sensor_outputs={
+                    "cam.rgb": {"params": {}},
+                    "cam.bbox2d": {"params": {"min_box_px": 8}},
+                },
+                category_names={},
+            )
+
+            sink.on_start(ctx)
+            self.assertIn("cam.rgb", sink.exporter.channels)
+            self.assertIn("cam.bbox2d", sink.exporter.channels)
+            sink.on_finish()
+
     def test_export_map_true_without_occ_grid_warns_and_skips(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "sample.mcap")

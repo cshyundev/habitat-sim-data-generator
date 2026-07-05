@@ -140,8 +140,9 @@ def generate_occupancy_grid_from_sim(
     Recomputes Simulator's navmesh based on agent specifications, extracts the navmesh vertices,
     and returns a projected OccupancyGrid2D map.
     """
-    # 1. Agent size — single source: the habitat agent, populated from config
-    # robot.body in src/simulator/factory.py. Explicit args override (e.g. tests).
+    # 1. Agent size -- single source: the habitat agent, populated from the
+    # URDF-derived robot body dimensions in src/simulator/factory.py. Explicit
+    # args override (e.g. tests).
     if agent_height is None or agent_radius is None:
         agent_cfg = sim.get_agent(0).agent_config
         if agent_height is None:

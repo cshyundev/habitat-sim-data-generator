@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Union
+from dataclasses import dataclass, field
+from typing import Any, Dict
 
 import numpy as np
 
@@ -8,15 +8,29 @@ from src.datatypes.point_cloud import PointCloud
 
 
 @dataclass
-class CameraObservation:
-    """A captured camera image plus its semantic modality."""
+class SensorProduct:
+    """One named output produced by a sensor capture."""
 
-    image: np.ndarray
-    modality: str
+    sensor_name: str
+    output_name: str
+    payload: Any
+    frame_id: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def channel_key(self) -> str:
+        return f"{self.sensor_name}.{self.output_name}"
+
+
+@dataclass
+class SensorCapture:
+    """Captured outputs from one physical sensor."""
+
+    sensor_name: str
+    products: Dict[str, SensorProduct]
 
     def __post_init__(self):
-        self.image = np.asarray(self.image)
-        self.modality = str(self.modality).lower()
+        self.products = {str(k).lower(): v for k, v in self.products.items()}
 
 
 @dataclass
@@ -54,9 +68,4 @@ class ImuObservation:
             )
 
 
-SensorObservation = Union[
-    CameraObservation,
-    PointCloudObservation,
-    LaserScanObservation,
-    ImuObservation,
-]
+SensorObservation = SensorCapture

@@ -6,7 +6,8 @@ the ``raycasting`` section and builds the appropriate interchangeable
 Sensors always hold a ``RayCaster`` and never care which backend is inside; to change
 the engine you change the config, not the class.
 
-Config schema (top-level ``raycasting`` key)::
+Config schema (``robot.raycasting`` in ``config_stream.yaml``; top-level
+``raycasting`` is still accepted)::
 
     raycasting:
       backend: sim          # sim | gpu (alias: mlx)
@@ -42,7 +43,7 @@ class RayCaster:
 
     @staticmethod
     def _build_backend(config: dict) -> RaycastBackend:
-        """Select and construct the backend from ``config['raycasting']``."""
+        """Select and construct the backend from runtime raycasting config."""
         rc = RaycastingConfig.from_config(config or {})
         if rc.backend == "sim":
             return SimRaycastBackend()

@@ -4,7 +4,7 @@ import numpy as np
 from src.datatypes.pose import Pose3D
 from src.datatypes.motion_state import MotionState
 from src.datatypes.point_cloud import PointCloud
-from src.datatypes.observation import CameraObservation, ImuObservation, PointCloudObservation
+from src.datatypes.observation import ImuObservation, PointCloudObservation, SensorCapture, SensorProduct
 from src.pipeline.sink import StreamContext, StreamEvent
 from src.visualization.backend import VisualizationBackend
 from src.visualization.visualization_sink import VisualizationSink, _normalize_vertex_colors
@@ -70,6 +70,21 @@ class _FakeSensor:
 
 def _fake_lidar(name="lidar"):
     return _FakeSensor(name, "lidar3d", "lidar_link")
+
+
+def _capture(sensor, products):
+    return SensorCapture(
+        sensor_name=sensor.name,
+        products={
+            name: SensorProduct(
+                sensor_name=sensor.name,
+                output_name=name,
+                payload=payload,
+                frame_id=sensor.parent_link,
+            )
+            for name, payload in products.items()
+        },
+    )
 
 
 def _motion_state():
@@ -139,7 +154,8 @@ class TestVisualizationSink(unittest.TestCase):
         }]
         ctx = StreamContext(
             config={}, scene_markers=markers,
-            tf_manager=_FakeTF(), sensors=[_fake_lidar(), _FakeSensor("imu", "imu", "imu_link")],
+            tf_manager=_FakeTF(),
+            sensors=[_fake_lidar(), _FakeSensor("imu", "imu", "imu_link")],
         )
         sink.on_start(ctx)
 
@@ -155,7 +171,8 @@ class TestVisualizationSink(unittest.TestCase):
         sink = VisualizationSink(backend)
         ctx = StreamContext(config={}, scene_markers=[],
                             tf_manager=_FakeTF(),
-                            sensors=[_fake_lidar(), _FakeSensor("imu", "imu", "imu_link")])
+                            sensors=[_fake_lidar(), _FakeSensor("imu", "imu", "imu_link")],
+                            sensor_outputs={"imu.imu": {"params": {}}})
         sink.on_start(ctx)
         layouts = [c[1] for c in backend.calls if c[0] == "layout"]
         self.assertEqual(layouts, [(sink.imu_path,)])  # one combined IMU window
@@ -173,10 +190,11 @@ class TestVisualizationSink(unittest.TestCase):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
         imu = _FakeSensor("imu", "imu", "imu_link")
-        obs = {"imu": ImuObservation(
+        imu_obs = ImuObservation(
             angular_velocity=np.array([0.1, 0.2, 0.3]),
             linear_acceleration=np.array([0.4, 0.5, 0.6]),
-        )}
+        )
+        obs = {"imu": _capture(imu, {"imu": imu_obs})}
         sink.on_event(_event([imu], obs))
 
         self.assertIn(("set_time", 1000), backend.calls)
@@ -188,9 +206,10 @@ class TestVisualizationSink(unittest.TestCase):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
         lidar = _fake_lidar()
-        obs = {"lidar": PointCloudObservation(
+        pc_obs = PointCloudObservation(
             PointCloud(points=np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32))
-        )}
+        )
+        obs = {"lidar": _capture(lidar, {"point_cloud": pc_obs})}
         sink.on_event(_event([lidar], obs))
 
         self.assertEqual(backend.paths("points"), ["world/robot/lidar_link/points"])
@@ -199,7 +218,7 @@ class TestVisualizationSink(unittest.TestCase):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
         cam = _FakeSensor("cam", "camera", "camera_link")
-        sink.on_event(_event([cam], {"cam": CameraObservation(np.zeros((4, 4, 3)), "rgb")}))
+        sink.on_event(_event([cam], {"cam": object()}))
 
         # No spatial/scalar sensor logging for an unsupported type; no error.
         self.assertEqual(backend.kinds().count("points"), 0)
@@ -217,7 +236,8 @@ class TestVisualizationSink(unittest.TestCase):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
         lidar = _fake_lidar()
-        obs = {"lidar": PointCloudObservation(PointCloud(points=np.empty((0, 3), dtype=np.float32)))}
+        pc_obs = PointCloudObservation(PointCloud(points=np.empty((0, 3), dtype=np.float32)))
+        obs = {"lidar": _capture(lidar, {"point_cloud": pc_obs})}
         sink.on_event(_event([lidar], obs))
         self.assertEqual(backend.kinds().count("points"), 0)
 

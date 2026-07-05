@@ -14,18 +14,29 @@ def _valid_config():
         "scene_dataset_config_file": "dataset.json",
         "scene_id": "apt_0",
         "output_dir": "output",
-        "output_filename": "out.mcap",
-        "max_duration_sec": 1.0,
-        "raycasting": {"backend": "sim", "geometry": "collision", "dynamic": False, "leaf_size": 8},
         "planner": {
+            "max_duration_sec": 1.0,
             "global": {"type": "zigzag", "params": {}},
             "local": {"type": "differential_drive", "params": {}},
         },
-        "robot": {},
-        "detections": {},
+        "robot": {
+            "raycasting": {
+                "backend": "sim",
+                "geometry": "collision",
+                "dynamic": False,
+                "leaf_size": 8,
+            }
+        },
         "mcap_export": {
+            "output_filename": "out.mcap",
             "channels": {
-                "pose": {"topic": "/pose", "schema": "geometry_msgs/msg/PoseStamped"}
+                "camera_link": {
+                    "rgb": {
+                        "topic": "/camera/front/rgb",
+                        "schema": "sensor_msgs/msg/Image",
+                    },
+                },
+                "pose": {"topic": "/pose", "schema": "geometry_msgs/msg/PoseStamped"},
             }
         },
     }
@@ -39,6 +50,9 @@ class TestRuntimeConfigValidation(unittest.TestCase):
         self.assertEqual(cfg.planner.local_type, "differential_drive")
         self.assertEqual(cfg.raycasting.backend, "sim")
         self.assertEqual(cfg.mcap_export.channels["pose"].topic, "/pose")
+        self.assertEqual(cfg.mcap_export.sensor_channels["camera_link"]["rgb"].topic, "/camera/front/rgb")
+        self.assertEqual(cfg.output_filename, "out.mcap")
+        self.assertEqual(cfg.max_duration_sec, 1.0)
         self.assertFalse(cfg.mcap_export.export_map)
 
     def test_legacy_planner_config_validates(self):
@@ -55,9 +69,21 @@ class TestRuntimeConfigValidation(unittest.TestCase):
         with self.assertRaises(ConfigError):
             validate_runtime_config(cfg)
 
+    def test_legacy_detections_top_level_raises(self):
+        cfg = _valid_config()
+        cfg["detections"] = {}
+        with self.assertRaises(ConfigError):
+            validate_runtime_config(cfg)
+
     def test_invalid_max_duration_raises(self):
         cfg = _valid_config()
-        cfg["max_duration_sec"] = 0
+        cfg["planner"]["max_duration_sec"] = 0
+        with self.assertRaises(ConfigError):
+            validate_runtime_config(cfg)
+
+    def test_top_level_max_duration_is_not_supported(self):
+        cfg = _valid_config()
+        cfg["max_duration_sec"] = 1.0
         with self.assertRaises(ConfigError):
             validate_runtime_config(cfg)
 
@@ -87,6 +113,88 @@ class TestRuntimeConfigValidation(unittest.TestCase):
         with self.assertRaises(ConfigError):
             McapExportConfig.from_config({
                 "mcap_export": {"channels": {"pose": {"topic": "/pose"}}}
+            })
+
+    def test_mcap_sensor_channel_requires_nested_mapping(self):
+        with self.assertRaises(ConfigError):
+            McapExportConfig.from_config({
+                "mcap_export": {
+                    "channels": {
+                        "camera_front": {
+                            "topic": "/camera/front/rgb",
+                            "schema": "sensor_msgs/msg/Image",
+                        }
+                    }
+                }
+            })
+
+    def test_mcap_nested_sensor_channels_parse(self):
+        cfg = McapExportConfig.from_config({
+            "mcap_export": {
+                "channels": {
+                    "camera_front": {
+                        "rgb": {
+                            "topic": "/camera/front/rgb",
+                            "schema": "sensor_msgs/msg/Image",
+                        }
+                    }
+                }
+            }
+        })
+        self.assertEqual(
+            cfg.sensor_channels["camera_front"]["rgb"].topic,
+            "/camera/front/rgb",
+        )
+
+    def test_mcap_sensor_channels_parse(self):
+        cfg = McapExportConfig.from_config({
+            "mcap_export": {
+                "sensor_channels": {
+                    "camera_front": {
+                        "rgb": {
+                            "topic": "/camera/front/rgb",
+                            "schema": "sensor_msgs/msg/Image",
+                        }
+                    }
+                }
+            }
+        })
+        self.assertEqual(
+            cfg.sensor_channels["camera_front"]["rgb"].topic,
+            "/camera/front/rgb",
+        )
+
+    def test_mcap_sensor_channels_require_topic_and_schema(self):
+        with self.assertRaises(ConfigError):
+            McapExportConfig.from_config({
+                "mcap_export": {
+                    "sensor_channels": {
+                        "camera_front": {
+                            "rgb": {"topic": "/camera/front/rgb"},
+                        }
+                    }
+                }
+            })
+
+    def test_mcap_sensor_channels_reject_duplicate_topic(self):
+        with self.assertRaises(ConfigError):
+            McapExportConfig.from_config({
+                "mcap_export": {
+                    "channels": {
+                        "pose": {
+                            "topic": "/shared",
+                            "schema": "geometry_msgs/msg/PoseStamped",
+                        }
+                    },
+                    "sensor_channels": {
+                        "imu": {
+                            "imu": {
+                                "topic": "/shared",
+                                "schema": "sensor_msgs/msg/Imu",
+                            }
+                        }
+                    },
+                }
             })
 
     def test_mcap_export_map_boolean(self):

@@ -42,6 +42,15 @@ class _SensorSuite:
     sensors = []
     tf_manager = _TFManager()
 
+    def sensor_outputs(self):
+        return {}
+
+    def reset_schedule(self, start_ns=0):
+        pass
+
+    def next_event(self):
+        return None
+
 
 class _GlobalPlanner(BaseGlobalPlanner):
     def __init__(self):
@@ -95,6 +104,7 @@ class TestStreamingPipelinePlanning(unittest.TestCase):
             local_planner=local_planner,
             scene_markers=[],
         )
+        pipeline.run([])
 
         self.assertIsNotNone(global_planner.start_pose)
         self.assertEqual(len(local_planner.waypoints), 2)

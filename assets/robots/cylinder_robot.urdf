@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
-<!-- Default cylinder robot. Convention: ROS REP-103 (Z-up, X-forward). -->
-<!-- Equivalent to src.robot.make_cylinder_robot(height=0.5, radius=0.25). -->
+<!-- Default cylinder robot with sensor mount frames. Convention: ROS REP-103 (Z-up, X-forward). -->
+<!-- Body geometry matches src.robot.cylinder_urdf(height=0.5, radius=0.25). -->
 <robot name="cylinder_robot">
   <!-- Cylindrical body: base sits on the floor plane (z in [0, 0.5]). -->
   <link name="base_link">
@@ -24,5 +24,21 @@
     <parent link="base_link"/>
     <child link="lidar_link"/>
     <origin xyz="0 0 0.5" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Forward camera frame. -->
+  <link name="camera_link"/>
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_link"/>
+    <origin xyz="-0.1 0 0.5" rpy="0 0 0"/>
+  </joint>
+
+  <!-- IMU frame at the base origin. -->
+  <link name="imu_link"/>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 </robot>

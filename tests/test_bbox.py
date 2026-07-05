@@ -133,13 +133,11 @@ class _RecBackend:
 class TestVizSink(unittest.TestCase):
     def test_sink_logs_2d_and_3d_detections(self):
         from src.datatypes.motion_state import MotionState
-        from src.datatypes.observation import CameraObservation
-        from src.pipeline.sink import StreamEvent
+        from src.datatypes.observation import SensorCapture, SensorProduct
         from src.visualization.visualization_sink import VisualizationSink
 
         be = _RecBackend()
         sink = VisualizationSink(be)
-        sink._rgb_cam_name = "camera_rgb"
 
         d2 = Detection2D(5, 20, "chair", (1, 2, 3, 4))
         # Anisotropic box (identity rotation in Habitat world) -> catches a wrong
@@ -149,10 +147,21 @@ class TestVizSink(unittest.TestCase):
         o3 = OBB3D(5, 20, "chair", c, he, np.array([0, 0, 0, 1.0]), "world")
         ms = MotionState(np.zeros(3), np.array([0, 0, 0, 1.0]), 0,
                          np.zeros(3), np.zeros(3), np.zeros(3))
-        ev = StreamEvent(0, ms, {"camera_rgb": CameraObservation(np.zeros((4, 4, 3), np.uint8), "rgb")}, [],
-                         detections={"bbox2d": [d2], "bbox3d": {"world": [o3], "camera": []}})
+        cam = type("FakeCamera", (), {
+            "name": "camera_front",
+            "sensor_type": "camera",
+            "parent_link": "camera_link",
+        })()
+        obs = SensorCapture(
+            sensor_name="camera_front",
+            products={
+                "rgb": SensorProduct("camera_front", "rgb", np.zeros((4, 4, 3), np.uint8), "camera_link"),
+                "bbox2d": SensorProduct("camera_front", "bbox2d", [d2], "camera_link"),
+                "bbox3d": SensorProduct("camera_front", "bbox3d", {"world": [o3], "camera": []}, "map"),
+            },
+        )
 
-        sink._log_detections(ev)
+        sink._log_capture(cam, obs)
         self.assertIsNotNone(be.b3d)
         self.assertEqual(be.b2d[0], [1, 2, 3, 4])  # 2D box passthrough
 

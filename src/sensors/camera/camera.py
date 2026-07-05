@@ -2,12 +2,14 @@ import math
 import numpy as np
 import magnum as mn
 import habitat_sim
-from typing import Any, Optional, Dict
+from typing import Any, Optional, Dict, List
 from scipy.spatial.transform import Rotation
 
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.motion_state import MotionState
-from src.datatypes.observation import CameraObservation
+from src.datatypes.bbox import Detection2D
+from src.detections.categories import build_category_names, name_for
+from src.detections.obb import global_obbs, obb_to_camera
 from src.sensors.camera.models import (
     Camera,
     PerspectiveCamera,
@@ -55,10 +57,8 @@ class CameraSensor(BaseSensor):
       accurate than rasterization and works for any (wide-FOV) model.
 
     The projection math comes from the vendored spatialkit camera models
-    (``src/sensors/camera/models``). Public interface (constructor signature,
-    ``is_native``/``get_sensor_spec``/``get_observation`` and the
-    typed observation return contract) is preserved so the rest of the pipeline
-    (SensorSuite, simulator factory, export_helper) is untouched.
+    (``src/sensors/camera/models``). Camera-specific generation stays inside
+    this class; SensorSuite wraps returned output payloads for export.
     """
 
     def __init__(
@@ -67,31 +67,49 @@ class CameraSensor(BaseSensor):
         sensor_type: str,
         parent_link: str,
         hz: int,
-        topic: str,
-        schema: str,
         parameters: dict,
         tf_manager: Any,
         raycaster: Any = None,
+        config: Optional[dict] = None,
+        output_names: Optional[list] = None,
+        output_params: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         super().__init__(
             name=name,
             sensor_type=sensor_type,
             parent_link=parent_link,
             hz=hz,
-            topic=topic,
-            schema=schema,
             parameters=parameters,
             tf_manager=tf_manager,
             raycaster=raycaster,
+            config=config,
+            output_names=output_names,
+            output_params=output_params,
         )
 
-        self.modality = parameters.get("modality", "rgb").lower()
+        self.modalities = {str(name).lower() for name in (output_names or [])}
+        self.modality_params = {
+            str(name).lower(): dict(params)
+            for name, params in (output_params or {}).items()
+        }
         self.model = parameters.get("model", "pinhole").lower()
         self.width = int(parameters.get("width", 640))
         self.height = int(parameters.get("height", 480))
-        self.hfov = float(parameters.get("hfov", 90.0))
+        if "hfov" in parameters:
+            self.hfov = float(parameters["hfov"])
+        elif "intrinsic" in parameters:
+            intrinsic = parameters["intrinsic"]
+            if not isinstance(intrinsic, (list, tuple)) or len(intrinsic) != 4:
+                raise ValueError("camera intrinsic must be [fx, fy, cx, cy].")
+            fx = float(intrinsic[0])
+            self.hfov = math.degrees(2.0 * math.atan(self.width / (2.0 * fx)))
+        else:
+            self.hfov = 90.0
         self.min_distance = float(parameters.get("min_distance", 0.05))
         self.max_distance = float(parameters.get("max_distance", 100.0))
+        self._raycast_outputs = self.modalities & {
+            "depth", "semantic", "instance", "bbox2d", "bbox3d"
+        }
 
         # Resolve static offset pose from base_link to this sensor's parent_link.
         # No silent fallback: an unresolvable parent_link is a config error, not
@@ -110,7 +128,10 @@ class CameraSensor(BaseSensor):
 
         # Depth representation: pinhole-like -> planar z-depth, wide-angle -> euclidean.
         default_depth = "planar" if self.model in _PINHOLE_LIKE else "euclidean"
-        self.depth_type = parameters.get("depth_type", default_depth).lower()
+        depth_cfg = self.modality_params.get("depth", {})
+        self.depth_type = depth_cfg.get(
+            "depth_type", parameters.get("depth_type", default_depth)
+        ).lower()
 
         # Target projection model (spatialkit Camera). Needed for ray casting
         # (depth/semantic) and for RGB remap (non-native models).
@@ -118,18 +139,34 @@ class CameraSensor(BaseSensor):
         self.needs_remap = False
         self.src_cam: Optional[EquirectangularCamera] = None
 
-        if self.modality in ("depth", "semantic", "instance"):
+        if self._raycast_outputs:
             self.cam = self._build_model()
             self._precompute_rays()
-        elif self.modality == "rgb" and self.model not in _HABITAT_NATIVE_RGB:
+        if self._has_output("rgb") and self.model not in _HABITAT_NATIVE_RGB:
             # RGB with a non-native model: render equirect, then remap.
-            self.cam = self._build_model()
+            if self.cam is None:
+                self.cam = self._build_model()
             self.needs_remap = True
             self.render_height = int(parameters.get("render_height", 1024))
             self.render_width = self.render_height * 2
             self.src_cam = EquirectangularCamera.from_image_size(
                 [self.render_width, self.render_height]
             )
+        self._categories = None
+        self._world_obbs = None
+
+    @classmethod
+    def validate_outputs(cls, outputs: Dict[str, Any]) -> None:
+        allowed = {"rgb", "depth", "semantic", "instance", "bbox2d", "bbox3d"}
+        unsupported = sorted(set(outputs) - allowed)
+        if unsupported:
+            raise ValueError(
+                "camera outputs contain unsupported name(s): "
+                f"{', '.join(unsupported)}. Available: {', '.join(sorted(allowed))}."
+            )
+
+    def _has_output(self, output_name: str) -> bool:
+        return output_name in self.modalities
 
     # ------------------------------------------------------------------
     # Model construction
@@ -140,6 +177,20 @@ class CameraSensor(BaseSensor):
         image_size = [self.width, self.height]
 
         if self.model in _PINHOLE_LIKE:
+            if "intrinsic" in p:
+                intrinsic = p["intrinsic"]
+                if not isinstance(intrinsic, (list, tuple)) or len(intrinsic) != 4:
+                    raise ValueError("camera intrinsic must be [fx, fy, cx, cy].")
+                fx, fy, cx, cy = [float(v) for v in intrinsic]
+                cam_dict = {
+                    "image_size": image_size,
+                    "focal_length": (fx, fy),
+                    "principal_point": (cx, cy),
+                    "skew": p.get("skew", 0.0),
+                    "radial": p.get("radial", [0.0, 0.0, 0.0]),
+                    "tangential": p.get("tangential", [0.0, 0.0]),
+                }
+                return PerspectiveCamera(cam_dict)
             if "focal_length" in p and "principal_point" in p:
                 cam_dict = {
                     "image_size": image_size,
@@ -260,9 +311,6 @@ class CameraSensor(BaseSensor):
         return _as_builtin({
             "name": self.name,
             "frame_id": self.parent_link,
-            "topic": self.topic,
-            "schema": self.schema,
-            "modality": self.modality,
             "model": self.model,
             "width": self.width,
             "height": self.height,
@@ -270,6 +318,7 @@ class CameraSensor(BaseSensor):
             "min_distance": self.min_distance,
             "max_distance": self.max_distance,
             "depth_type": self.depth_type,
+            "enabled_outputs": sorted(self.modalities),
             "camera_model": model_data,
             "parameters": self.parameters,
         })
@@ -292,11 +341,11 @@ class CameraSensor(BaseSensor):
     def is_native(self) -> bool:
         # RGB is rasterized by habitat (directly or via an equirect render source).
         # Depth/Semantic/Instance are ray-cast and therefore non-native.
-        return self.modality == "rgb"
+        return self._has_output("rgb")
 
     def get_sensor_spec(self) -> Optional[habitat_sim.SensorSpec]:
-        """SensorSpec for native rendering. Returns None for ray-cast modalities."""
-        if self.modality != "rgb":
+        """SensorSpec for native rendering. Returns None without an RGB output."""
+        if not self._has_output("rgb"):
             return None
 
         if self.needs_remap:
@@ -330,31 +379,33 @@ class CameraSensor(BaseSensor):
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
         tf_manager: Any,
-    ) -> CameraObservation:
+    ) -> Dict[str, Any]:
         """
-        Returns a CameraObservation:
+        Returns output payloads keyed by configured camera output name:
         - RGB: rasterized image (native, or remapped from equirect).
         - Depth: float32 (H, W) planar z-depth or euclidean range.
         - Semantic: (H, W) hit semantic_id (Class ID).
         - Instance: (H, W) hit object_id (Instance ID).
         """
-        if self.modality == "rgb":
-            return self._observe_rgb(sim)
-        return self._observe_raycast(sim, motion_state)
+        outputs: Dict[str, Any] = {}
+        if self._has_output("rgb"):
+            outputs["rgb"] = self._observe_rgb(sim)
+        if self._raycast_outputs:
+            outputs.update(self._observe_raycast(sim, motion_state))
+        return outputs
 
     # ------------------------------------------------------------------
     # RGB
     # ------------------------------------------------------------------
-    def _observe_rgb(self, sim: habitat_sim.Simulator) -> CameraObservation:
+    def _observe_rgb(self, sim: habitat_sim.Simulator) -> np.ndarray:
         obs = sim.get_sensor_observations()
         if self.name not in obs:
-            return CameraObservation(image=np.empty((0, 0), dtype=np.uint8), modality=self.modality)
+            return np.empty((0, 0), dtype=np.uint8)
         image = obs[self.name]
         if not self.needs_remap:
-            return CameraObservation(image=image, modality=self.modality)
+            return image
         # Remap the equirectangular render to the target camera model.
-        remapped = transition_camera_view(image, self.src_cam, self.cam)
-        return CameraObservation(image=remapped, modality=self.modality)
+        return transition_camera_view(image, self.src_cam, self.cam)
 
     # ------------------------------------------------------------------
     # Ray casting (depth / semantic / instance, and reused by detections)
@@ -417,22 +468,97 @@ class CameraSensor(BaseSensor):
         sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(self.height, self.width)
         return obj, sem
 
+    def _ensure_detection_context(self, sim: habitat_sim.Simulator) -> None:
+        if self._categories is None:
+            self._categories = build_category_names(sim)
+        if self._world_obbs is None and self._has_output("bbox3d"):
+            from src.raycasting import extract_scene_model
+            from src.runtime_config import RaycastingConfig
+
+            geometry = RaycastingConfig.from_config(self.config).geometry
+            scene_model = extract_scene_model(sim, geometry)
+            self._world_obbs = global_obbs(scene_model, self._categories)
+
+    def _bbox2d_from_maps(self, obj: np.ndarray, sem: np.ndarray) -> List[Detection2D]:
+        det2d_cfg = self.modality_params.get("bbox2d", {})
+        min_box_px = int(det2d_cfg.get("min_box_px", self.parameters.get("min_box_px", 8)))
+        dets: List[Detection2D] = []
+        for oid in np.unique(obj):
+            oid = int(oid)
+            if oid == 0:
+                continue
+            ys, xs = np.where(obj == oid)
+            x1, x2 = int(xs.min()), int(xs.max())
+            y1, y2 = int(ys.min()), int(ys.max())
+            if min(x2 - x1 + 1, y2 - y1 + 1) < min_box_px:
+                continue
+            class_id = int(np.bincount(sem[ys, xs].astype(np.int64)).argmax())
+            dets.append(
+                Detection2D(
+                    instance_id=oid,
+                    class_id=class_id,
+                    class_name=name_for(self._categories or {}, class_id),
+                    xyxy=(x1, y1, x2, y2),
+                )
+            )
+        return dets
+
     def _observe_raycast(
         self, sim: habitat_sim.Simulator, motion_state: MotionState
-    ) -> CameraObservation:
+    ) -> Dict[str, Any]:
         H, W = self.height, self.width
         res, hit = self._cast(sim, motion_state)
+        outputs: Dict[str, Any] = {}
+        obj = None
+        sem = None
 
-        if self.modality == "depth":
+        if self._has_output("depth"):
             dist = np.where(hit, res.distance, 0.0).astype(np.float32)
             if self.depth_type == "planar":
                 dist = (dist * self._ray_cos).astype(np.float32)
-            out = dist
-        elif self.modality == "semantic":
-            out = np.where(hit, res.semantic_id, 0).astype(np.uint32)
-        elif self.modality == "instance":
-            out = np.where(hit, res.object_id, 0).astype(np.uint32)
-        else:
-            out = np.zeros(H * W, dtype=np.uint32)
+            outputs["depth"] = dist.reshape(H, W)
 
-        return CameraObservation(image=out.reshape(H, W), modality=self.modality)
+        needs_semantic = self._has_output("semantic") or self._has_output("bbox2d")
+        if needs_semantic:
+            sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(H, W)
+
+        needs_instance = (
+            self._has_output("instance")
+            or self._has_output("bbox2d")
+            or self._has_output("bbox3d")
+        )
+        if needs_instance:
+            obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(H, W)
+
+        if self._has_output("semantic"):
+            if sem is None:
+                sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(H, W)
+            outputs["semantic"] = sem
+
+        if self._has_output("instance"):
+            if obj is None:
+                obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(H, W)
+            outputs["instance"] = obj
+
+        if self._has_output("bbox2d"):
+            if sem is None:
+                sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(H, W)
+            if obj is None:
+                obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(H, W)
+            self._ensure_detection_context(sim)
+            outputs["bbox2d"] = self._bbox2d_from_maps(obj, sem)
+
+        if self._has_output("bbox3d"):
+            if obj is None:
+                obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(H, W)
+            self._ensure_detection_context(sim)
+            visible = [int(o) for o in np.unique(obj) if int(o) != 0]
+            cam_pos, cam_quat = self.world_pose(motion_state)
+            world = [
+                self._world_obbs[o] for o in visible
+                if self._world_obbs is not None and o in self._world_obbs
+            ]
+            camera = [obb_to_camera(w, cam_pos, cam_quat) for w in world]
+            outputs["bbox3d"] = {"camera": camera, "world": world}
+
+        return outputs

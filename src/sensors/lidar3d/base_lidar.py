@@ -4,7 +4,7 @@ import numpy as np
 import magnum as mn
 # pyrefly: ignore [missing-import]
 import habitat_sim
-from typing import Optional, Any
+from typing import Optional, Any, Dict
 from scipy.spatial.transform import Rotation
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.motion_state import MotionState
@@ -20,11 +20,12 @@ class LiDAR3D(BaseSensor, abc.ABC):
         sensor_type: str,
         parent_link: str,
         hz: int,
-        topic: str,
-        schema: str,
         parameters: dict,
         tf_manager: Any,
         raycaster: Any = None,
+        config: Optional[dict] = None,
+        output_names: Optional[list] = None,
+        output_params: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         """
         Initialize the base LiDAR sensor.
@@ -34,11 +35,12 @@ class LiDAR3D(BaseSensor, abc.ABC):
             sensor_type=sensor_type,
             parent_link=parent_link,
             hz=hz,
-            topic=topic,
-            schema=schema,
             parameters=parameters,
             tf_manager=tf_manager,
             raycaster=raycaster,
+            config=config,
+            output_names=output_names,
+            output_params=output_params,
         )
         self.uuid = name
         
@@ -62,6 +64,13 @@ class LiDAR3D(BaseSensor, abc.ABC):
 
     def get_sensor_spec(self) -> Optional[habitat_sim.SensorSpec]:
         return None
+
+    @classmethod
+    def validate_outputs(cls, outputs: Dict[str, Any]) -> None:
+        if set(outputs) != {"point_cloud"}:
+            raise ValueError(
+                "lidar3d sensors must define exactly one output named 'point_cloud'."
+            )
 
     @abc.abstractmethod
     def get_observation(

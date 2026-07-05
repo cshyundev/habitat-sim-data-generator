@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 def parse_args():
     ap = argparse.ArgumentParser(description="Streaming Habitat data generation.")
-    ap.add_argument("config", nargs="?", default="config_stream.yaml",
+    ap.add_argument("config", nargs="?", default="config/config_stream.yaml",
                     help="YAML config path (default: config_stream.yaml).")
     ap.add_argument("--visualize", action="store_true",
                     help="Enable live Rerun visualization.")

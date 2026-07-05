@@ -1,10 +1,10 @@
 """Robot/sensor configuration loader and validator.
 
-Loads the robot **structure** from a URDF (a file path, or runtime-generated from
-``robot.body`` + ``robot.mounts`` when no file is given) and the sensor **parameters**
-from a separate sensor-spec file, then maps sensors to URDF frames by ``parent_link``
-name. Every input is validated up front and **fails loudly** — there are no silent
-fallbacks (no defaulted topic/schema, no skipped unknown sensor types).
+Loads the robot **structure** from the required ``robot.urdf`` file and the
+sensor **parameters** from a separate sensor-spec file. Each sensor is keyed by
+the URDF ``link`` it is attached to. Every input is validated up front and **fails loudly** — there are no
+silent fallbacks (no generated robot, no defaulted channels, no skipped unknown
+sensor types).
 
 Returns a :class:`RobotBundle` consumed by :class:`src.sensors.suite.SensorSuite`:
 ``frames`` feed the ``TFManager``; ``sensors`` are instantiated via the registry.
@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import yaml
 
-from src.robot import cylinder_urdf, urdf_body_dims, urdf_frames
+from src.robot import urdf_body_dims, urdf_frames
 from src.sensors.registry import get_sensor_class
 import src.sensors.builtin  # noqa: F401  (registers built-in sensor types for validation)
 
@@ -28,14 +28,19 @@ class ConfigError(Exception):
 
 
 @dataclass
+class SensorOutputSpec:
+    name: str
+    params: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class SensorSpec:
     name: str
     type: str
     parent_link: str
     hz: int
-    topic: str
-    schema: str
     parameters: Dict[str, Any] = field(default_factory=dict)
+    outputs: Dict[str, SensorOutputSpec] = field(default_factory=dict)
 
 
 @dataclass
@@ -63,27 +68,12 @@ def _require_nonempty_str(d: dict, key: str, ctx: str) -> str:
 
 
 def _resolve_urdf_text(robot: dict):
-    """Return ``(urdf_text, base_dir)``: load the file at robot.urdf, or generate
-    the cylinder. ``base_dir`` (for resolving mesh paths) is the URDF directory for
-    a file, ``None`` for a runtime-generated (primitive) URDF."""
-    urdf_path = robot.get("urdf")
-    if urdf_path:
-        if not os.path.exists(urdf_path):
-            raise ConfigError(f"robot.urdf: file not found: {urdf_path}")
-        with open(urdf_path) as f:
-            return f.read(), os.path.dirname(os.path.abspath(urdf_path))
-
-    # Runtime generation: needs body dims + sensor mount frames.
-    body = _require(robot, "body", "robot (no 'urdf' given, generating cylinder)")
-    height = _require(body, "height", "robot.body")
-    radius = _require(body, "radius", "robot.body")
-    mounts = _require(robot, "mounts", "robot (no 'urdf' given, generating cylinder)")
-    if not isinstance(mounts, list) or not mounts:
-        raise ConfigError("robot.mounts: must be a non-empty list of {name, parent, xyz}.")
-    for i, m in enumerate(mounts):
-        for k in ("name", "parent", "xyz"):
-            _require(m, k, f"robot.mounts[{i}]")
-    return cylinder_urdf(height=float(height), radius=float(radius), mounts=mounts), None
+    """Return ``(urdf_text, base_dir)`` loaded from the required ``robot.urdf``."""
+    urdf_path = _require_nonempty_str(robot, "urdf", "robot")
+    if not os.path.exists(urdf_path):
+        raise ConfigError(f"robot.urdf: file not found: {urdf_path}")
+    with open(urdf_path) as f:
+        return f.read(), os.path.dirname(os.path.abspath(urdf_path))
 
 
 def _parse_urdf_frames(text: str) -> List[dict]:
@@ -108,20 +98,28 @@ def _load_sensor_specs(robot: dict, frame_names: set) -> List[SensorSpec]:
         raise ConfigError(f"sensor spec '{path}': 'sensors' must be a non-empty list.")
 
     specs: List[SensorSpec] = []
-    seen_topics: Dict[str, str] = {}
+    raw_sensor_frames = robot.get("sensor_frames", {}) or {}
+    if not isinstance(raw_sensor_frames, dict):
+        raise ConfigError("robot.sensor_frames: must be a mapping when provided.")
+
     for i, s in enumerate(raw):
         ctx = f"sensor[{i}]"
-        name = _require_nonempty_str(s, "name", ctx)
+        if "link" in s:
+            link = _require_nonempty_str(s, "link", ctx)
+            name = link
+            parent_link = link
+        else:
+            # Migration path for older fixtures/configs. New configs should use
+            # link and omit name/sensor_frames.
+            name = _require_nonempty_str(s, "name", ctx)
+            parent_link = _require_nonempty_str(raw_sensor_frames, name, "robot.sensor_frames")
         ctx = f"sensor '{name}'"
         s_type = _require_nonempty_str(s, "type", ctx)
-        parent_link = _require_nonempty_str(s, "parent_link", ctx)
-        topic = _require_nonempty_str(s, "topic", ctx)
-        schema = _require_nonempty_str(s, "schema", ctx)
         hz = _require(s, "hz", ctx)
 
         # type must be registered
         try:
-            get_sensor_class(s_type)
+            sensor_cls = get_sensor_class(s_type)
         except KeyError as exc:
             raise ConfigError(f"{ctx}: {exc}") from exc
 
@@ -132,12 +130,67 @@ def _load_sensor_specs(robot: dict, frame_names: set) -> List[SensorSpec]:
                 f"Available links: {sorted(frame_names)}"
             )
 
-        # topic must be unique (MCAP channels collide otherwise)
-        if topic in seen_topics:
-            raise ConfigError(
-                f"{ctx}: topic '{topic}' already used by sensor '{seen_topics[topic]}'."
+        parameters = s.get("parameters", {}) or {}
+        if not isinstance(parameters, dict):
+            raise ConfigError(f"{ctx}.parameters: must be a mapping.")
+
+        if "parent_link" in s:
+            raise ConfigError(f"{ctx}: frame attachment must be declared as sensor.link.")
+        if "topic" in s or "schema" in s:
+            raise ConfigError(f"{ctx}: export channels must live under mcap_export.channels.")
+        if "modality" in parameters:
+            raise ConfigError(f"{ctx}: legacy parameters.modality is not supported.")
+
+        if "outputs" in s and "modalities" in s:
+            raise ConfigError(f"{ctx}: use either outputs or modalities, not both.")
+        if "outputs" in s:
+            raw_outputs = _require(s, "outputs", ctx)
+            if not isinstance(raw_outputs, dict) or not raw_outputs:
+                raise ConfigError(f"{ctx}.outputs: must be a non-empty mapping.")
+        elif "modalities" in s:
+            raw_modalities = _require(s, "modalities", ctx)
+            if isinstance(raw_modalities, list):
+                raw_outputs = {str(modality).lower(): {} for modality in raw_modalities}
+            elif isinstance(raw_modalities, dict):
+                raw_outputs = raw_modalities
+            else:
+                raise ConfigError(f"{ctx}.modalities: must be a list or mapping.")
+            if not raw_outputs:
+                raise ConfigError(f"{ctx}.modalities: must not be empty.")
+        else:
+            raise ConfigError(f"{ctx}: missing required key 'outputs' or 'modalities'.")
+
+        outputs: Dict[str, SensorOutputSpec] = {}
+        for output_name, output_cfg in raw_outputs.items():
+            output_key = str(output_name).lower()
+            out_ctx = f"{ctx}.outputs.{output_key}"
+            output_cfg = output_cfg or {}
+            if not isinstance(output_cfg, dict):
+                raise ConfigError(f"{out_ctx}: must be a mapping.")
+            if "topic" in output_cfg or "schema" in output_cfg:
+                raise ConfigError(
+                    f"{out_ctx}: export channels must live under "
+                    "mcap_export.channels."
+                )
+            params = {
+                str(k): v
+                for k, v in output_cfg.items()
+            }
+            if output_key == "depth" and "depth_type" in parameters:
+                params.setdefault("depth_type", parameters["depth_type"])
+            if output_key == "bbox2d" and "min_box_px" in parameters:
+                params.setdefault("min_box_px", parameters["min_box_px"])
+            outputs[output_key] = SensorOutputSpec(
+                name=output_key,
+                params=dict(params),
             )
-        seen_topics[topic] = name
+
+        validate_outputs = getattr(sensor_cls, "validate_outputs", None)
+        if validate_outputs is not None:
+            try:
+                validate_outputs(outputs)
+            except ValueError as exc:
+                raise ConfigError(f"{ctx}: {exc}") from exc
 
         specs.append(
             SensorSpec(
@@ -145,9 +198,8 @@ def _load_sensor_specs(robot: dict, frame_names: set) -> List[SensorSpec]:
                 type=s_type,
                 parent_link=parent_link,
                 hz=int(hz),
-                topic=topic,
-                schema=schema,
-                parameters=s.get("parameters", {}) or {},
+                parameters=parameters,
+                outputs=outputs,
             )
         )
     return specs

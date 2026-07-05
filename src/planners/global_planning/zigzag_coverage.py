@@ -46,7 +46,7 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
         p = self.params
         occ_grid = generate_occupancy_grid_from_sim(
             sim=sim,
-            agent_height=kwargs.get("agent_height"),  # None -> read from sim agent (robot.body)
+            agent_height=kwargs.get("agent_height"),  # None -> read from sim agent.
             agent_radius=kwargs.get("agent_radius"),
             resolution=kwargs.get("resolution", p.resolution),
             obstacle_radius_m=kwargs.get("wall_distance", p.wall_distance),

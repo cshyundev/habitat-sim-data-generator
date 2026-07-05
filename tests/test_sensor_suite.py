@@ -5,6 +5,7 @@ import unittest
 import numpy as np
 import yaml
 
+from src.robot import cylinder_urdf
 from src.utils.tf import TFManager
 from src.sensors.suite import SensorSuite
 from src.sensors.base_sensor import BaseSensor
@@ -18,7 +19,7 @@ def _suite(cfg):
     return SensorSuite(load_robot(cfg), cfg)
 
 
-# --- helpers: build new-format configs (urdf null + mounts + sensors file) ----
+# --- helpers: build new-format configs (URDF file + sensors file) ----
 _TMP = tempfile.mkdtemp()
 _seq = [0]
 
@@ -27,17 +28,19 @@ def _mount(name, xyz):
     return {"name": name, "parent": "base_link", "xyz": xyz, "rpy": [0, 0, 0]}
 
 
-def _cfg(mounts, sensors):
+def _cfg(mounts, sensors, sensor_frames):
     _seq[0] += 1
     path = os.path.join(_TMP, f"sensors_{_seq[0]}.yaml")
     with open(path, "w") as f:
         yaml.safe_dump({"sensors": sensors}, f)
+    urdf_path = os.path.join(_TMP, f"robot_{_seq[0]}.urdf")
+    with open(urdf_path, "w") as f:
+        f.write(cylinder_urdf(1.6, 0.15, mounts=mounts))
     return {
         "robot": {
-            "urdf": None,
+            "urdf": urdf_path,
             "sensors": path,
-            "body": {"height": 1.6, "radius": 0.15},
-            "mounts": mounts,
+            "sensor_frames": sensor_frames,
         }
     }
 
@@ -46,11 +49,14 @@ def _multi_rate_config():
     return _cfg(
         [_mount("lidar_link", [0, 0, 0.3]), _mount("imu_link", [0, 0, 0])],
         [
-            {"name": "lidar_3d", "type": "lidar3d", "parent_link": "lidar_link", "hz": 10,
-             "topic": "/lidar", "schema": "sensor_msgs/msg/PointCloud2", "parameters": {}},
-            {"name": "imu", "type": "imu", "parent_link": "imu_link", "hz": 100,
-             "topic": "/imu", "schema": "sensor_msgs/msg/Imu", "parameters": {}},
+            {"name": "lidar_3d", "type": "lidar3d", "hz": 10,
+             "outputs": {"point_cloud": {}},
+             "parameters": {}},
+            {"name": "imu", "type": "imu", "hz": 100,
+             "outputs": {"imu": {}},
+             "parameters": {}},
         ],
+        {"lidar_3d": "lidar_link", "imu": "imu_link"},
     )
 
 
@@ -75,30 +81,65 @@ class TestTFManager(unittest.TestCase):
 
 
 class TestSensorSuiteInit(unittest.TestCase):
+    def test_link_keyed_camera_suite(self):
+        config = _cfg(
+            [_mount("camera_link", [0, 0, 0.5])],
+            [
+                {"link": "camera_link", "type": "camera", "hz": 5,
+                 "parameters": {
+                     "model": "pinhole",
+                     "width": 640,
+                     "height": 480,
+                     "intrinsic": [500.0, 500.0, 320.0, 240.0],
+                     "depth_type": "planar",
+                     "min_box_px": 8,
+                 },
+                 "modalities": ["rgb", "depth", "bbox2d"]},
+            ],
+            {},
+        )
+
+        suite = _suite(config)
+        self.assertEqual([s.name for s in suite.sensors], ["camera_link"])
+        self.assertEqual(
+            set(suite.sensor_outputs()),
+            {"camera_link.rgb", "camera_link.depth", "camera_link.bbox2d"},
+        )
+        specs = suite.get_native_sensor_specs()
+        self.assertEqual(specs[0].uuid, "camera_link")
+
     def test_sensor_suite_init(self):
         config = _cfg(
             [_mount("lidar_link", [0, 0, 0.3]), _mount("camera_link", [0, 0, 0.5])],
             [
-                {"name": "lidar_3d", "type": "lidar3d", "parent_link": "lidar_link", "hz": 10,
-                 "topic": "/lidar", "schema": "sensor_msgs/msg/PointCloud2",
+                {"name": "lidar_3d", "type": "lidar3d", "hz": 10,
+                 "outputs": {"point_cloud": {}},
                  "parameters": {"min_distance": 0.1, "max_distance": 30.0}},
-                {"name": "camera_rgb", "type": "camera", "parent_link": "camera_link", "hz": 5,
-                 "topic": "/camera/rgb", "schema": "sensor_msgs/msg/Image",
-                 "parameters": {"modality": "rgb", "width": 640, "height": 480}},
+                {"name": "camera_front", "type": "camera", "hz": 5,
+                 "parameters": {"width": 640, "height": 480},
+                 "outputs": {
+                     "rgb": {},
+                     "depth": {},
+                 }},
             ],
+            {"lidar_3d": "lidar_link", "camera_front": "camera_link"},
         )
 
         suite = _suite(config)
         self.assertEqual(len(suite.sensors), 2)
 
         lidar_sensor = next(s for s in suite.sensors if s.name == "lidar_3d")
-        camera_sensor = next(s for s in suite.sensors if s.name == "camera_rgb")
+        camera_sensor = next(s for s in suite.sensors if s.name == "camera_front")
         self.assertFalse(lidar_sensor.is_native())
         self.assertTrue(camera_sensor.is_native())
+        self.assertEqual(
+            set(suite.sensor_outputs()),
+            {"lidar_3d.point_cloud", "camera_front.rgb", "camera_front.depth"},
+        )
 
         specs = suite.get_native_sensor_specs()
         self.assertEqual(len(specs), 1)
-        self.assertEqual(specs[0].uuid, "camera_rgb")
+        self.assertEqual(specs[0].uuid, "camera_front")
         self.assertEqual(specs[0].resolution, [480, 640])  # height, width order
 
     def test_sensor_suite_builds_imu(self):
@@ -107,6 +148,37 @@ class TestSensorSuiteInit(unittest.TestCase):
         self.assertEqual(imu.sensor_type, "imu")
         self.assertFalse(imu.is_native())
         self.assertIsNone(imu.get_sensor_spec())
+
+    def test_legacy_single_modality_camera_config_raises(self):
+        config = _cfg(
+            [_mount("camera_link", [0, 0, 0.5])],
+            [
+                {"name": "camera_rgb", "type": "camera", "hz": 5,
+                 "topic": "/camera/rgb", "schema": "sensor_msgs/msg/Image",
+                 "parameters": {"modality": "rgb", "width": 640, "height": 480}},
+            ],
+            {"camera_rgb": "camera_link"},
+        )
+        with self.assertRaises(ConfigError):
+            _suite(config)
+
+    def test_export_channel_in_sensor_output_raises(self):
+        config = _cfg(
+            [_mount("camera_link", [0, 0, 0.5]), _mount("imu_link", [0, 0, 0])],
+            [
+                {"name": "camera_front", "type": "camera", "hz": 5,
+                 "parameters": {"width": 640, "height": 480},
+                 "outputs": {
+                     "rgb": {"topic": "/shared"},
+                 }},
+                {"name": "imu", "type": "imu", "hz": 100,
+                 "outputs": {"imu": {}},
+                 "parameters": {}},
+            ],
+            {"camera_front": "camera_link", "imu": "imu_link"},
+        )
+        with self.assertRaises(ConfigError):
+            _suite(config)
 
 
 class TestEventScheduler(unittest.TestCase):
@@ -134,8 +206,10 @@ class TestEventScheduler(unittest.TestCase):
         # 3 Hz -> period 1e9/3 ns is not an integer; ensure no accumulated drift.
         config = _cfg(
             [_mount("imu_link", [0, 0, 0])],
-            [{"name": "imu", "type": "imu", "parent_link": "imu_link", "hz": 3,
-              "topic": "/imu", "schema": "sensor_msgs/msg/Imu", "parameters": {}}],
+            [{"name": "imu", "type": "imu", "hz": 3,
+              "outputs": {"imu": {}},
+              "parameters": {}}],
+            {"imu": "imu_link"},
         )
         suite = _suite(config)
         suite.reset_schedule(0)
@@ -156,7 +230,7 @@ class _FakePluginSensor(BaseSensor):
         return None
 
     def get_observation(self, sim, motion_state, tf_manager):
-        return {self.name: "fake_observation"}
+        return {"sample": "fake_observation"}
 
 
 class TestSensorRegistry(unittest.TestCase):
@@ -191,8 +265,10 @@ class TestSensorRegistry(unittest.TestCase):
 
         config = _cfg(
             [_mount("plugin_link", [0, 0, 0])],
-            [{"name": "plugin_sensor", "type": "fake_plugin", "parent_link": "plugin_link", "hz": 1,
-              "topic": "/plugin", "schema": "std_msgs/msg/String", "parameters": {}}],
+            [{"name": "plugin_sensor", "type": "fake_plugin", "hz": 1,
+              "outputs": {"sample": {}},
+              "parameters": {}}],
+            {"plugin_sensor": "plugin_link"},
         )
         suite = _suite(config)
         self.assertEqual(len(suite.sensors), 1)
@@ -202,8 +278,10 @@ class TestSensorRegistry(unittest.TestCase):
         # No silent skip: an unregistered type must fail loudly at load.
         config = _cfg(
             [_mount("lidar_link", [0, 0, 0.3])],
-            [{"name": "mystery", "type": "bogus_type", "parent_link": "lidar_link", "hz": 1,
-              "topic": "/mystery", "schema": "std_msgs/msg/String", "parameters": {}}],
+            [{"name": "mystery", "type": "bogus_type", "hz": 1,
+              "outputs": {"sample": {}},
+              "parameters": {}}],
+            {"mystery": "lidar_link"},
         )
         with self.assertRaises(ConfigError):
             _suite(config)

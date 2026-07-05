@@ -1,7 +1,7 @@
 import numpy as np
 import magnum as mn
 import habitat_sim
-from typing import Any
+from typing import Any, Dict, Optional
 # pyrefly: ignore [missing-import]
 from src.sensors.lidar3d.base_lidar import LiDAR3D
 from src.datatypes.pose import Pose3D
@@ -21,11 +21,12 @@ class IdealLiDAR3D(LiDAR3D):
         sensor_type: str,
         parent_link: str,
         hz: int,
-        topic: str,
-        schema: str,
         parameters: dict,
         tf_manager: Any,
         raycaster: Any = None,
+        config: Optional[dict] = None,
+        output_names: Optional[list] = None,
+        output_params: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         """
         Initialize the Ideal 3D LiDAR sensor.
@@ -35,11 +36,12 @@ class IdealLiDAR3D(LiDAR3D):
             sensor_type=sensor_type,
             parent_link=parent_link,
             hz=hz,
-            topic=topic,
-            schema=schema,
             parameters=parameters,
             tf_manager=tf_manager,
             raycaster=raycaster,
+            config=config,
+            output_names=output_names,
+            output_params=output_params,
         )
         self.azimuth_range = tuple(parameters.get("azimuth_range", (-180.0, 180.0)))
         self.altitude_range = tuple(parameters.get("altitude_range", (-15.0, 15.0)))
@@ -77,7 +79,7 @@ class IdealLiDAR3D(LiDAR3D):
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
         tf_manager: Any
-    ) -> PointCloudObservation:
+    ):
         """
         Run spherical ray casting and return a local-frame PointCloud.
 
@@ -132,4 +134,5 @@ class IdealLiDAR3D(LiDAR3D):
             frame="local",
             timestamp_ns=motion_state.timestamp_ns,
         )
-        return PointCloudObservation(cloud=cloud)
+        observation = PointCloudObservation(cloud=cloud)
+        return {"point_cloud": observation}

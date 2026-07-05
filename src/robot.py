@@ -1,9 +1,9 @@
-"""Default cylinder robot + URDF helpers for habitat-sim.
+"""Cylinder robot URDF helpers for habitat-sim.
 
-Two responsibilities, both keyed on a URDF (file or runtime-generated, identical):
+Two responsibilities, both keyed on URDF data:
 
-* ``cylinder_urdf`` / ``add_robot`` — describe and instantiate the default cylinder
-  body (a habitat-sim articulated object). habitat-sim owns all geometry/collision.
+* ``cylinder_urdf`` / ``add_robot`` — describe and instantiate a cylinder body
+  (a habitat-sim articulated object). habitat-sim owns all geometry/collision.
 * ``urdf_frames`` — extract the link frame tree (mount poses) as the dict list the
   ``TFManager`` consumes. Used to source sensor mount frames from the URDF instead
   of a hand-written ``robot.links`` list. We read ``<joint><origin>`` directly

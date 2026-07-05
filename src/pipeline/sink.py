@@ -30,6 +30,7 @@ class StreamContext:
     scene_markers: List[dict]
     tf_manager: TFProvider
     sensors: List[BaseSensor]
+    sensor_outputs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     artifacts: Dict[str, Any] = field(default_factory=dict)
     category_names: Optional[Dict[int, str]] = None
 
@@ -41,9 +42,6 @@ class StreamEvent:
     motion_state: MotionState
     observations: Dict[str, SensorObservation]
     firing_sensors: List[BaseSensor]
-    # Camera-derived detections {"bbox2d", "bbox3d", "bbox3d_world"} when the
-    # referenced detections camera fired this event; None otherwise.
-    detections: Optional[Dict[str, Any]] = None
 
 
 class StreamSink(ABC):

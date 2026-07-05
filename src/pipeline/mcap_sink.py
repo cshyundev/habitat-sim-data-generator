@@ -15,7 +15,7 @@ from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
 from src.robot_config import ConfigError
 from src.runtime_config import McapExportConfig
 from src.utils.export import McapExporter
-from src.utils.coords import habitat_to_ros_pose, habitat_to_ros_obb, convert_occupancy_grid_to_ros
+from src.utils.coords import habitat_to_ros_pose, convert_occupancy_grid_to_ros
 from src.sensors.export_helper import export_sensor_data
 
 logger = logging.getLogger(__name__)
@@ -40,14 +40,39 @@ def _yaml_safe(value):
     return value
 
 
-def collect_camera_calibrations(sensors) -> list:
+def collect_calibrations(sensors, sensor_channels=None) -> list:
+    sensor_channels = sensor_channels or {}
     calibrations = []
     for sensor in sensors:
-        if getattr(sensor, "sensor_type", None) != "camera":
-            continue
         if hasattr(sensor, "calibration_dict"):
-            calibrations.append(sensor.calibration_dict())
+            record = sensor.calibration_dict()
+            sensor_prefix = f"{sensor.name}."
+            record["outputs"] = {
+                key[len(sensor_prefix):]: value
+                for key, value in sensor_channels.items()
+                if key.startswith(sensor_prefix)
+            }
+            calibrations.append(record)
     return _yaml_safe(calibrations)
+
+
+def _resolve_sensor_channels(ctx: StreamContext, export_config: McapExportConfig) -> dict:
+    channels = {}
+    for channel_key in ctx.sensor_outputs:
+        sensor_name, output_name = channel_key.split(".", 1)
+        try:
+            channel = export_config.sensor_channels[sensor_name][output_name]
+        except KeyError as exc:
+            raise ConfigError(
+                "Missing MCAP sensor channel config for "
+                f"mcap_export.channels.{sensor_name}.{output_name}."
+            ) from exc
+        channels[channel_key] = {
+            "topic": channel.topic,
+            "schema": channel.schema,
+            **ctx.sensor_outputs[channel_key],
+        }
+    return channels
 
 
 def write_sidecar_yaml(path: str, payload: dict) -> None:
@@ -65,24 +90,24 @@ class McapSink(StreamSink):
         self.mcap_path = mcap_path
         self.config = config
         self.exporter = None
-        self._rgb_parent_link = "camera_link"
 
     def on_start(self, ctx: StreamContext) -> None:
         self.exporter = McapExporter(self.mcap_path, self.config)
         self.exporter.start()
         export_config = McapExportConfig.from_config(self.config)
+        sensor_channels = _resolve_sensor_channels(ctx, export_config)
 
-        # Dynamic per-sensor channels (camera/imu use channel_key=sensor.name).
-        for sensor in ctx.sensors:
+        # Dynamic sensor product channels.
+        for key, channel in sensor_channels.items():
             self.exporter.register_channel_dynamic(
-                key=sensor.name, topic=sensor.topic, schema_name=sensor.schema
+                key=key, topic=channel["topic"], schema_name=channel["schema"]
             )
 
         write_sidecar_yaml(
             _sidecar_path(self.mcap_path, "calibration"),
             {
-                "format": "habitat-sim-data-generator.camera_calibration.v1",
-                "cameras": collect_camera_calibrations(ctx.sensors),
+                "format": "habitat-sim-data-generator.sensor_calibration.v1",
+                "sensors": collect_calibrations(ctx.sensors, sensor_channels),
             },
         )
         write_sidecar_yaml(
@@ -92,25 +117,6 @@ class McapSink(StreamSink):
                 "semantic_categories": ctx.category_names or {},
                 "config_snapshot": ctx.config,
             },
-        )
-
-        # Dynamic /det/bbox2d, /det/bbox3d channels -- decoupled per product,
-        # only registered when its config block is present (mirrors
-        # streaming.py::_build_detections).
-        det_cfg = self.config.get("detections", {})
-        if "bbox2d" in det_cfg:
-            b = det_cfg["bbox2d"]
-            self.exporter.register_channel_dynamic(
-                key="det_bbox2d", topic=b["topic"], schema_name=b["schema"]
-            )
-        if "bbox3d" in det_cfg:
-            b = det_cfg["bbox3d"]
-            self.exporter.register_channel_dynamic(
-                key="det_bbox3d", topic=b["topic"], schema_name=b["schema"]
-            )
-        self._rgb_parent_link = next(
-            (s.parent_link for s in ctx.sensors if getattr(s, "modality", None) == "rgb"),
-            "camera_link",
         )
 
         # Latched 2D occupancy grid (/map), when a global planner produced one.
@@ -166,22 +172,6 @@ class McapSink(StreamSink):
                     observation=ev.observations[sensor.name],
                     timestamp_ns=ev.timestamp_ns,
                 )
-
-        if ev.detections:
-            boxes2d = ev.detections.get("bbox2d")
-            if boxes2d is not None and "det_bbox2d" in self.exporter.channels:
-                self.exporter.write_detections2d(
-                    timestamp_ns=ev.timestamp_ns, frame_id=self._rgb_parent_link,
-                    channel_key="det_bbox2d", detections=boxes2d,
-                )
-            bbox3d = ev.detections.get("bbox3d")
-            if bbox3d is not None and "det_bbox3d" in self.exporter.channels:
-                boxes3d_ros = [habitat_to_ros_obb(o) for o in bbox3d.get("world", [])]
-                self.exporter.write_detections3d(
-                    timestamp_ns=ev.timestamp_ns, frame_id="map",
-                    channel_key="det_bbox3d", obbs=boxes3d_ros,
-                )
-
     def on_finish(self) -> None:
         if self.exporter is not None:
             self.exporter.finish()

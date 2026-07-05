@@ -3,7 +3,6 @@ from typing import Optional, Dict, Any
 import habitat_sim
 
 from src.datatypes.motion_state import MotionState
-from src.datatypes.observation import SensorObservation
 
 class BaseSensor(abc.ABC):
     """
@@ -16,11 +15,12 @@ class BaseSensor(abc.ABC):
         sensor_type: str,
         parent_link: str,
         hz: int,
-        topic: str,
-        schema: str,
         parameters: Dict[str, Any],
         tf_manager: Any,
         raycaster: Any = None,
+        config: Optional[dict] = None,
+        output_names: Optional[list] = None,
+        output_params: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         """
         Initialize the sensor.
@@ -30,27 +30,32 @@ class BaseSensor(abc.ABC):
             sensor_type: Type identifier (e.g., 'lidar3d', 'camera').
             parent_link: The TF frame link name this sensor is attached to.
             hz: Update frequency of the sensor.
-            topic: ROS topic to publish data to.
-            schema: ROS message schema name.
             parameters: Dictionary containing sensor-specific parameters.
             tf_manager: TFManager instance to fetch link transforms.
             raycaster: Shared ``RayCaster`` used for ray-based sensing. ``None``
                 falls back to a default ``RayCaster()`` (sim backend = ``sim.cast_ray``)
                 so a sensor can be constructed standalone (e.g. in tests). IMU-like
                 sensors ignore it; it is held for interface uniformity.
+            output_names/output_params: Generation hints owned by SensorSuite.
+                BaseSensor accepts them for a uniform constructor but does not
+                store export metadata.
         """
         self.name = name
         self.sensor_type = sensor_type
         self.parent_link = parent_link
         self.hz = hz
-        self.topic = topic
-        self.schema = schema
         self.parameters = parameters
+        self.config = config or {}
         self.tf_manager = tf_manager
         if raycaster is None:
             from src.raycasting.raycaster import RayCaster
             raycaster = RayCaster()  # empty config -> sim backend
         self.raycaster = raycaster
+
+    @classmethod
+    def validate_outputs(cls, outputs: Dict[str, Any]) -> None:
+        """Validate sensor-specific output names. Subclasses may override."""
+        return None
 
     @abc.abstractmethod
     def is_native(self) -> bool:
@@ -74,7 +79,7 @@ class BaseSensor(abc.ABC):
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
         tf_manager: Any
-    ) -> SensorObservation:
+    ) -> Dict[str, Any]:
         """
         Generates sensor observation data.
 

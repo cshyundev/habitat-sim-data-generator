@@ -8,8 +8,8 @@ class ZigzagCoverageParams:
 
     These are ground/2D-grid-specific (resolution, wall_distance, ...) and
     intentionally live with this concrete planner, not in the platform-general
-    BaseGlobalPlanner. Robot body size (height/radius) is NOT here — it comes
-    from the single config robot.body source via the habitat agent.
+    BaseGlobalPlanner. Robot body size (height/radius) is NOT here -- it is
+    derived from the URDF and then exposed via the habitat agent.
     """
     resolution: float = 0.05
     wall_distance: float = 0.3

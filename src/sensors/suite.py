@@ -3,7 +3,7 @@ import habitat_sim
 
 from src.utils.tf import TFManager
 from src.datatypes.motion_state import MotionState
-from src.datatypes.observation import SensorObservation
+from src.datatypes.observation import SensorCapture, SensorObservation, SensorProduct
 from src.sensors.base_sensor import BaseSensor
 from src.sensors.registry import get_sensor_class
 from src.robot_config import RobotBundle, SensorSpec
@@ -33,9 +33,11 @@ class SensorSuite:
         # 2. Shared ray-caster (selects its backend from config; sim default). One
         #    instance is shared by every sensor so geometry is extracted/built once.
         self.raycaster = RayCaster(config)
+        self.config = config
 
         # 3. Build Sensors
         self.sensors: List[BaseSensor] = []
+        self._spec_by_name: Dict[str, SensorSpec] = {}
         self._build_sensors(robot.sensors)
 
         # 4. Event-driven scheduler state (used by reset_schedule()/next_event()).
@@ -49,23 +51,35 @@ class SensorSuite:
         registry. New sensor types are added by decorating a BaseSensor
         subclass with @register_sensor("type_name") -- this method never
         needs to change. All specs are pre-validated by load_robot (type is
-        registered, topic/schema present, parent_link resolves), so there is
-        nothing to default or skip here.
+        registered, output names are valid, and the configured sensor frame
+        resolves), so there is nothing to default or skip here.
         """
         for spec in specs:
+            self._spec_by_name[spec.name] = spec
             sensor_cls = get_sensor_class(spec.type)
-            sensor = sensor_cls(
+            kwargs = dict(
                 name=spec.name,
                 sensor_type=spec.type,
                 parent_link=spec.parent_link,
                 hz=spec.hz,
-                topic=spec.topic,
-                schema=spec.schema,
                 parameters=spec.parameters,
                 tf_manager=self.tf_manager,
                 raycaster=self.raycaster,
+                config=self.config,
+                output_names=list(spec.outputs),
+                output_params={name: out.params for name, out in spec.outputs.items()},
             )
+            sensor = sensor_cls(**kwargs)
             self.sensors.append(sensor)
+
+    def sensor_outputs(self) -> Dict[str, Dict[str, Any]]:
+        outputs: Dict[str, Dict[str, Any]] = {}
+        for spec in self._spec_by_name.values():
+            for output_name, output in spec.outputs.items():
+                outputs[f"{spec.name}.{output_name}"] = {
+                    "params": dict(output.params),
+                }
+        return outputs
 
     def get_native_sensor_specs(self) -> List[habitat_sim.SensorSpec]:
         """
@@ -146,7 +160,34 @@ class SensorSuite:
 
         observations: Dict[str, SensorObservation] = {}
         for sensor in sensors:
-            observations[sensor.name] = sensor.get_observation(
+            raw_outputs = sensor.get_observation(
                 sim, motion_state, self.tf_manager
             )
+            observations[sensor.name] = self._capture(sensor, raw_outputs)
         return observations
+
+    def _capture(self, sensor: BaseSensor, raw_outputs: Dict[str, Any]) -> SensorCapture:
+        spec = self._spec_by_name[sensor.name]
+        if not isinstance(raw_outputs, dict):
+            raise RuntimeError(
+                f"Sensor '{sensor.name}' returned {type(raw_outputs).__name__}; "
+                "expected a mapping of output name to payload."
+            )
+
+        products: Dict[str, SensorProduct] = {}
+        for output_name, payload in raw_outputs.items():
+            output_key = str(output_name).lower()
+            if output_key not in spec.outputs:
+                raise RuntimeError(
+                    f"Sensor '{sensor.name}' returned undeclared output '{output_key}'."
+                )
+            output = spec.outputs[output_key]
+            frame_id = "map" if output_key == "bbox3d" else sensor.parent_link
+            products[output_key] = SensorProduct(
+                sensor_name=sensor.name,
+                output_name=output_key,
+                payload=payload,
+                frame_id=frame_id,
+                metadata=dict(output.params),
+            )
+        return SensorCapture(sensor_name=sensor.name, products=products)

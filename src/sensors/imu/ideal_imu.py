@@ -49,11 +49,12 @@ class IdealIMU(BaseSensor):
         sensor_type: str,
         parent_link: str,
         hz: int,
-        topic: str,
-        schema: str,
         parameters: dict,
         tf_manager: Any,
         raycaster: Any = None,
+        config: Optional[dict] = None,
+        output_names: Optional[list] = None,
+        output_params: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         # IMU does not ray-cast; ``raycaster`` is accepted only for a uniform
         # sensor constructor signature.
@@ -62,11 +63,12 @@ class IdealIMU(BaseSensor):
             sensor_type=sensor_type,
             parent_link=parent_link,
             hz=hz,
-            topic=topic,
-            schema=schema,
             parameters=parameters,
             tf_manager=tf_manager,
             raycaster=raycaster,
+            config=config,
+            output_names=output_names,
+            output_params=output_params,
         )
         if tf_manager is None:
             self.pose = _identity_pose()
@@ -77,6 +79,11 @@ class IdealIMU(BaseSensor):
             parameters.get("include_gravity", parameters.get("apply_gravity", True))
         )
         self.gravity_mps2 = float(parameters.get("gravity_mps2", 9.80665))
+
+    @classmethod
+    def validate_outputs(cls, outputs: Dict[str, Any]) -> None:
+        if set(outputs) != {"imu"}:
+            raise ValueError("imu sensors must define exactly one output named 'imu'.")
 
     def is_native(self) -> bool:
         return False
@@ -89,7 +96,7 @@ class IdealIMU(BaseSensor):
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
         tf_manager: Any
-    ) -> ImuObservation:
+    ):
         """
         Returns gyroscope and accelerometer readings in the IMU sensor frame.
 
@@ -121,7 +128,8 @@ class IdealIMU(BaseSensor):
         omega_imu = imu_R_base @ omega_base
         accel_imu = imu_R_base @ accel_at_imu
 
-        return ImuObservation(
+        observation = ImuObservation(
             angular_velocity=omega_imu,
             linear_acceleration=accel_imu,
         )
+        return {"imu": observation}
