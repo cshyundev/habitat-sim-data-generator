@@ -1,15 +1,21 @@
 import numpy as np
-from typing import Any
 
 from src.utils.export import McapExporter
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.point_cloud import PointCloud
+from src.datatypes.observation import (
+    CameraObservation,
+    ImuObservation,
+    LaserScanObservation,
+    PointCloudObservation,
+    SensorObservation,
+)
 from src.utils.coords import habitat_to_ros_pointcloud, habitat_to_ros_position
 
 def export_sensor_data(
     exporter: McapExporter,
     sensor: BaseSensor,
-    observation: Any,
+    observation: SensorObservation,
     timestamp_ns: int
 ) -> None:
     """
@@ -22,13 +28,8 @@ def export_sensor_data(
         observation: Raw observation payload.
         timestamp_ns: Simulation timestamp in nanoseconds.
     """
-    if observation is None:
-        return
-        
-    if sensor.sensor_type == "lidar3d":
-        if sensor.name not in observation:
-            return
-        cloud = observation[sensor.name]
+    if isinstance(observation, PointCloudObservation):
+        cloud = observation.cloud
         if cloud is None or cloud.size == 0:
             return
 
@@ -41,21 +42,24 @@ def export_sensor_data(
             channel_key=sensor.name,
             cloud=ros_cloud
         )
-        
-    elif sensor.sensor_type == "imu":
-        av_key = f"{sensor.name}_angular_velocity"
-        la_key = f"{sensor.name}_linear_acceleration"
-        if av_key not in observation or la_key not in observation:
-            return
 
-        # Body-frame (Habitat axes) -> ROS sensor-frame axes. The angular
-        # velocity and linear acceleration are 3-vectors and transform the same
-        # way as a position vector under the Habitat->ROS basis change.
+    elif isinstance(observation, LaserScanObservation):
+        exporter.write_laser_scan(
+            timestamp_ns=timestamp_ns,
+            frame_id=sensor.parent_link,
+            channel_key=sensor.name,
+            scan=observation.scan,
+        )
+
+    elif isinstance(observation, ImuObservation):
+        # IMU-frame Habitat axes -> IMU-frame ROS axes. Angular velocity and
+        # linear acceleration are 3-vectors and transform the same way as a
+        # position vector under the Habitat->ROS basis change.
         angular_velocity_ros = habitat_to_ros_position(
-            np.asarray(observation[av_key], dtype=np.float64)
+            np.asarray(observation.angular_velocity, dtype=np.float64)
         )
         linear_acceleration_ros = habitat_to_ros_position(
-            np.asarray(observation[la_key], dtype=np.float64)
+            np.asarray(observation.linear_acceleration, dtype=np.float64)
         )
 
         exporter.write_imu(
@@ -66,14 +70,12 @@ def export_sensor_data(
             linear_acceleration=linear_acceleration_ros,
         )
 
-    elif sensor.sensor_type == "camera":
-        if sensor.name not in observation:
-            return
-        img_data = observation[sensor.name]
-        if img_data is None:
+    elif isinstance(observation, CameraObservation):
+        img_data = observation.image
+        if img_data is None or img_data.size == 0:
             return
             
-        modality = sensor.parameters.get("modality", "rgb").lower()
+        modality = observation.modality
         if modality == "rgb":
             # Determine channels count
             channels = img_data.shape[2] if img_data.ndim == 3 else 1

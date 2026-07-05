@@ -133,6 +133,7 @@ class _RecBackend:
 class TestVizSink(unittest.TestCase):
     def test_sink_logs_2d_and_3d_detections(self):
         from src.datatypes.motion_state import MotionState
+        from src.datatypes.observation import CameraObservation
         from src.pipeline.sink import StreamEvent
         from src.visualization.visualization_sink import VisualizationSink
 
@@ -148,7 +149,7 @@ class TestVizSink(unittest.TestCase):
         o3 = OBB3D(5, 20, "chair", c, he, np.array([0, 0, 0, 1.0]), "world")
         ms = MotionState(np.zeros(3), np.array([0, 0, 0, 1.0]), 0,
                          np.zeros(3), np.zeros(3), np.zeros(3))
-        ev = StreamEvent(0, ms, {"camera_rgb": {"camera_rgb": np.zeros((4, 4, 3), np.uint8)}}, [],
+        ev = StreamEvent(0, ms, {"camera_rgb": CameraObservation(np.zeros((4, 4, 3), np.uint8), "rgb")}, [],
                          detections={"bbox2d": [d2], "bbox3d": {"world": [o3], "camera": []}})
 
         sink._log_detections(ev)

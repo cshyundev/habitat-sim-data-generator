@@ -3,6 +3,7 @@ from typing import Optional, Dict, Any
 import habitat_sim
 
 from src.datatypes.motion_state import MotionState
+from src.datatypes.observation import SensorObservation
 
 class BaseSensor(abc.ABC):
     """
@@ -73,7 +74,7 @@ class BaseSensor(abc.ABC):
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
         tf_manager: Any
-    ) -> Dict[str, Any]:
+    ) -> SensorObservation:
         """
         Generates sensor observation data.
 
@@ -86,6 +87,6 @@ class BaseSensor(abc.ABC):
             tf_manager: The TFManager instance to query frame transforms.
 
         Returns:
-            Dictionary containing topic names mapping to raw data dicts or objects.
+            A typed sensor observation payload.
         """
         pass

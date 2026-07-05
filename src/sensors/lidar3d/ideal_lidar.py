@@ -7,6 +7,7 @@ from src.sensors.lidar3d.base_lidar import LiDAR3D
 from src.datatypes.pose import Pose3D
 from src.datatypes.motion_state import MotionState
 from src.datatypes.point_cloud import PointCloud
+from src.datatypes.observation import PointCloudObservation
 from src.sensors.registry import register_sensor
 
 @register_sensor("lidar3d")
@@ -76,12 +77,12 @@ class IdealLiDAR3D(LiDAR3D):
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
         tf_manager: Any
-    ) -> dict:
+    ) -> PointCloudObservation:
         """
         Run spherical ray casting and return a local-frame PointCloud.
 
         Returns:
-            ``{self.uuid: PointCloud}`` -- points already converted from the
+            PointCloudObservation with points already converted from the
             range/semantic image via ``to_point_cloud(frame="local")``.
         """
         H, W = self.altitude_bins, self.azimuth_bins
@@ -131,5 +132,4 @@ class IdealLiDAR3D(LiDAR3D):
             frame="local",
             timestamp_ns=motion_state.timestamp_ns,
         )
-        return {self.uuid: cloud}
-
+        return PointCloudObservation(cloud=cloud)

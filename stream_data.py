@@ -14,6 +14,7 @@ import argparse
 import yaml
 
 from src.robot_config import load_robot
+from src.runtime_config import validate_runtime_config
 from src.sensors.suite import SensorSuite
 from src.simulator.factory import create_simulator
 from src.pipeline.streaming import build_pipeline
@@ -37,12 +38,13 @@ def main():
     args = parse_args()
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
+    runtime_config = validate_runtime_config(config)
 
     print("1. Initialize Sensor...")
     robot = load_robot(config)
     sensor_suite = SensorSuite(robot, config)
 
-    print(f"2. Initialize habitat simulator (Scene: {config['scene_id']})...")
+    print(f"2. Initialize habitat simulator (Scene: {runtime_config.scene_id})...")
     sim = create_simulator(config, robot, sensor_suite)
 
     try:
@@ -52,9 +54,9 @@ def main():
 
         sinks = []
         if not args.no_mcap:
-            output_dir = config["output_dir"]
+            output_dir = runtime_config.output_dir
             os.makedirs(output_dir, exist_ok=True)
-            mcap_path = os.path.join(output_dir, config["output_filename"])
+            mcap_path = os.path.join(output_dir, runtime_config.output_filename)
             sinks.append(McapSink(mcap_path, config))
             print(f"   - MCAP Output Path: {mcap_path}")
 

@@ -43,30 +43,30 @@ class TestIdealIMU(unittest.TestCase):
         st = _state([0.0, 0.0, 0.0], [0.0, 0.0, -0.5])
         obs = self.imu.get_observation(sim=None, motion_state=st, tf_manager=None)
         self.assertTrue(
-            np.allclose(obs["imu_linear_acceleration"], [0.0, 9.80665, -0.5])
+            np.allclose(obs.linear_acceleration, [0.0, 9.80665, -0.5])
         )
-        self.assertTrue(np.allclose(obs["imu_angular_velocity"], [0.0, 0.0, 0.0]))
+        self.assertTrue(np.allclose(obs.angular_velocity, [0.0, 0.0, 0.0]))
 
     def test_yaw_rate(self):
         # Pure yaw rotation about +Y.
         st = _state([0.0, 1.0, 0.0], [0.0, 0.0, 0.0])
         obs = self.imu.get_observation(sim=None, motion_state=st, tf_manager=None)
-        self.assertTrue(np.allclose(obs["imu_angular_velocity"], [0.0, 1.0, 0.0]))
+        self.assertTrue(np.allclose(obs.angular_velocity, [0.0, 1.0, 0.0]))
         self.assertTrue(
-            np.allclose(obs["imu_linear_acceleration"], [0.0, 9.80665, 0.0])
+            np.allclose(obs.linear_acceleration, [0.0, 9.80665, 0.0])
         )
 
     def test_rest_state_includes_gravity_by_default(self):
         st = _state([0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
         obs = self.imu.get_observation(sim=None, motion_state=st, tf_manager=None)
-        self.assertTrue(np.allclose(obs["imu_angular_velocity"], 0.0))
-        self.assertTrue(np.allclose(obs["imu_linear_acceleration"], [0.0, 9.80665, 0.0]))
+        self.assertTrue(np.allclose(obs.angular_velocity, 0.0))
+        self.assertTrue(np.allclose(obs.linear_acceleration, [0.0, 9.80665, 0.0]))
 
     def test_gravity_can_be_disabled(self):
         imu = _make_imu(parameters={"include_gravity": False})
         st = _state([0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
         obs = imu.get_observation(sim=None, motion_state=st, tf_manager=None)
-        self.assertTrue(np.allclose(obs["imu_linear_acceleration"], 0.0))
+        self.assertTrue(np.allclose(obs.linear_acceleration, 0.0))
 
     def test_sensor_frame_rotation_is_applied(self):
         tf_manager = TFManager([
@@ -76,7 +76,7 @@ class TestIdealIMU(unittest.TestCase):
         imu = _make_imu(parameters={"include_gravity": False}, tf_manager=tf_manager)
         st = _state([1.0, 0.0, 0.0], [0.0, 0.0, 0.0])
         obs = imu.get_observation(sim=None, motion_state=st, tf_manager=tf_manager)
-        self.assertTrue(np.allclose(obs["imu_angular_velocity"], [-1.0, 0.0, 0.0]))
+        self.assertTrue(np.allclose(obs.angular_velocity, [-1.0, 0.0, 0.0]))
 
     def test_lever_arm_centrifugal_acceleration_is_applied(self):
         tf_manager = TFManager([
@@ -86,15 +86,13 @@ class TestIdealIMU(unittest.TestCase):
         imu = _make_imu(parameters={"include_gravity": False}, tf_manager=tf_manager)
         st = _state([0.0, 2.0, 0.0], [0.0, 0.0, 0.0])
         obs = imu.get_observation(sim=None, motion_state=st, tf_manager=tf_manager)
-        self.assertTrue(np.allclose(obs["imu_linear_acceleration"], [-4.0, 0.0, 0.0]))
+        self.assertTrue(np.allclose(obs.linear_acceleration, [-4.0, 0.0, 0.0]))
 
     def test_output_keys_and_shapes(self):
         st = _state([0.1, 0.2, 0.3], [0.4, 0.5, 0.6])
         obs = self.imu.get_observation(sim=None, motion_state=st, tf_manager=None)
-        self.assertIn("imu_angular_velocity", obs)
-        self.assertIn("imu_linear_acceleration", obs)
-        self.assertEqual(obs["imu_angular_velocity"].shape, (3,))
-        self.assertEqual(obs["imu_linear_acceleration"].shape, (3,))
+        self.assertEqual(obs.angular_velocity.shape, (3,))
+        self.assertEqual(obs.linear_acceleration.shape, (3,))
 
 
 if __name__ == "__main__":

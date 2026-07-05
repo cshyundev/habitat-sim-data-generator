@@ -6,6 +6,7 @@ from typing import Any, Optional, Dict
 
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.motion_state import MotionState
+from src.datatypes.observation import CameraObservation
 from src.sensors.camera.models import (
     Camera,
     PerspectiveCamera,
@@ -55,7 +56,7 @@ class CameraSensor(BaseSensor):
     The projection math comes from the vendored spatialkit camera models
     (``src/sensors/camera/models``). Public interface (constructor signature,
     ``is_native``/``get_sensor_spec``/``get_observation`` and the
-    ``{name: image}`` return contract) is preserved so the rest of the pipeline
+    typed observation return contract) is preserved so the rest of the pipeline
     (SensorSuite, simulator factory, export_helper) is untouched.
     """
 
@@ -347,9 +348,9 @@ class CameraSensor(BaseSensor):
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
         tf_manager: Any,
-    ) -> Dict[str, Any]:
+    ) -> CameraObservation:
         """
-        Returns ``{self.name: image}``:
+        Returns a CameraObservation:
         - RGB: rasterized image (native, or remapped from equirect).
         - Depth: float32 (H, W) planar z-depth or euclidean range.
         - Semantic: (H, W) hit semantic_id (Class ID).
@@ -362,16 +363,16 @@ class CameraSensor(BaseSensor):
     # ------------------------------------------------------------------
     # RGB
     # ------------------------------------------------------------------
-    def _observe_rgb(self, sim: habitat_sim.Simulator) -> Dict[str, Any]:
+    def _observe_rgb(self, sim: habitat_sim.Simulator) -> CameraObservation:
         obs = sim.get_sensor_observations()
         if self.name not in obs:
-            return {self.name: None}
+            return CameraObservation(image=np.empty((0, 0), dtype=np.uint8), modality=self.modality)
         image = obs[self.name]
         if not self.needs_remap:
-            return {self.name: image}
+            return CameraObservation(image=image, modality=self.modality)
         # Remap the equirectangular render to the target camera model.
         remapped = transition_camera_view(image, self.src_cam, self.cam)
-        return {self.name: remapped}
+        return CameraObservation(image=remapped, modality=self.modality)
 
     # ------------------------------------------------------------------
     # Ray casting (depth / semantic / instance, and reused by detections)
@@ -436,7 +437,7 @@ class CameraSensor(BaseSensor):
 
     def _observe_raycast(
         self, sim: habitat_sim.Simulator, motion_state: MotionState
-    ) -> Dict[str, Any]:
+    ) -> CameraObservation:
         H, W = self.height, self.width
         res, hit = self._cast(sim, motion_state)
 
@@ -452,4 +453,4 @@ class CameraSensor(BaseSensor):
         else:
             out = np.zeros(H * W, dtype=np.uint32)
 
-        return {self.name: out.reshape(H, W)}
+        return CameraObservation(image=out.reshape(H, W), modality=self.modality)

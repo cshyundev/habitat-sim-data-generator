@@ -88,22 +88,33 @@ for calibration.
 
 ## P2 — Architecture refactors
 
-### 10. Typed observation contract
+### 10. ~~Typed observation contract~~ DONE
 **Cause:** Observations are `Dict[str, Any]` with per-sensor private key
 conventions (`{name: img}` vs `{f"{name}_angular_velocity": ...}`);
 `export_helper.py` is a stringly-typed `sensor_type` switch. A typed
 `Observation` union removes the convention coupling between sensors and sinks.
+**Resolution:** Added `src/datatypes/observation.py` with typed observation
+payloads (`CameraObservation`, `PointCloudObservation`, `ImuObservation`, etc.).
+Sensors now return these payloads directly, and export/visualization dispatch
+on observation type instead of private string keys.
 
-### 11. Validate remaining config sections like `robot.*` is validated
+### 11. ~~Validate remaining config sections like `robot.*` is validated~~ DONE
 **Cause:** Raw `config: dict` threads through every layer; `mcap_export.*`,
 `raycasting.*`, `max_duration_sec` are ad-hoc `.get()` chains that fail
 silently on typos, while `robot_config.py` shows the validated-dataclass
 pattern already in use.
+**Resolution:** Added `src/runtime_config.py` with validated dataclasses for
+runtime, raycasting, and MCAP export config. `stream_data.py`, `RayCaster`,
+`McapExporter`, and pipeline duration handling now use this validation layer.
 
-### 12. Type the pipeline seams
+### 12. ~~Type the pipeline seams~~ DONE
 **Cause:** `StreamContext.occ_grid: Any`, `tf_manager: Any`,
 `detections: Dict[str, Any] = None` (not even `Optional`), extractors take an
 untyped `camera`. Weak seams hide exactly the frame/contract bugs above.
+**Resolution:** `StreamContext` and `StreamEvent` now type occupancy grids,
+TF protocol, typed observations, and optional detections explicitly. Detection
+camera resolution is annotated against `CameraSensor` and validates detection
+config keys loudly.
 
 ### 13. ~~CDR alignment boilerplate → small `CdrWriter` helper~~ MOOT
 **Cause:** The align-pad block is copy-pasted ~35 times in `export.py`, while

@@ -13,6 +13,7 @@ consistent with the MCAP/offline view.
 import numpy as np
 
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
+from src.datatypes.observation import CameraObservation, ImuObservation, PointCloudObservation
 from src.visualization.backend import VisualizationBackend
 from src.utils.coords import (
     habitat_to_ros_pose,
@@ -71,11 +72,6 @@ class VisualizationSink(StreamSink):
         self.detections_path = "world/detections"
         self._rgb_cam_name = None
         self._trajectory: list = []
-        # sensor_type -> handler(self, sensor, observation)
-        self._dispatch = {
-            "lidar3d": VisualizationSink._log_lidar3d,
-            "imu": VisualizationSink._log_imu,
-        }
 
     # ------------------------------------------------------------------
     # StreamSink
@@ -151,10 +147,10 @@ class VisualizationSink(StreamSink):
             observation = ev.observations.get(sensor.name)
             if observation is None:
                 continue
-            handler = self._dispatch.get(sensor.sensor_type)
-            if handler is None:
-                continue  # unsupported sensor type -> silently skipped
-            handler(self, sensor, observation)
+            if isinstance(observation, PointCloudObservation):
+                self._log_lidar3d(sensor, observation)
+            elif isinstance(observation, ImuObservation):
+                self._log_imu(sensor, observation)
 
         if ev.detections:
             self._log_detections(ev)
@@ -184,10 +180,9 @@ class VisualizationSink(StreamSink):
             self.backend.log_boxes3d(self.detections_path, centers, halfs, quats, colors, labels)
 
         # 2D boxes overlaid on the RGB image, when the RGB camera fired this event.
-        # Each sensor observation is a dict {sensor_name: image}.
         boxes2d = det.get("bbox2d")
         obs = ev.observations.get(self._rgb_cam_name) if self._rgb_cam_name else None
-        img = obs.get(self._rgb_cam_name) if isinstance(obs, dict) else None
+        img = obs.image if isinstance(obs, CameraObservation) else None
         if boxes2d is not None and img is not None:
             self.backend.log_image_boxes2d(
                 f"camera/{self._rgb_cam_name}",
@@ -200,8 +195,8 @@ class VisualizationSink(StreamSink):
     # ------------------------------------------------------------------
     # Per-sensor-type handlers
     # ------------------------------------------------------------------
-    def _log_lidar3d(self, sensor, observation) -> None:
-        cloud = observation  # PointCloud
+    def _log_lidar3d(self, sensor, observation: PointCloudObservation) -> None:
+        cloud = observation.cloud
         if cloud is None or cloud.size == 0:
             return
         ros_pc = habitat_to_ros_pointcloud(cloud.points).astype(np.float32)
@@ -212,13 +207,9 @@ class VisualizationSink(StreamSink):
             radius=0.025,
         )
 
-    def _log_imu(self, sensor, observation) -> None:
-        av_key = f"{sensor.name}_angular_velocity"
-        la_key = f"{sensor.name}_linear_acceleration"
-        if av_key not in observation or la_key not in observation:
-            return
-        av = habitat_to_ros_position(np.asarray(observation[av_key], dtype=np.float64))
-        la = habitat_to_ros_position(np.asarray(observation[la_key], dtype=np.float64))
+    def _log_imu(self, sensor, observation: ImuObservation) -> None:
+        av = habitat_to_ros_position(np.asarray(observation.angular_velocity, dtype=np.float64))
+        la = habitat_to_ros_position(np.asarray(observation.linear_acceleration, dtype=np.float64))
         base = f"{self.imu_path}/{sensor.name}"
         for i, axis in enumerate(("x", "y", "z")):
             self.backend.log_scalar(f"{base}/angular_velocity/{axis}", float(av[i]))

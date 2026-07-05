@@ -17,6 +17,8 @@ from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
 from src.detections import BBox2DExtractor, BBox3DExtractor, build_category_names
 from src.raycasting import extract_scene_model
 from src.robot_config import ConfigError
+from src.runtime_config import RaycastingConfig, max_duration_ns_from_config
+from src.sensors.camera.camera import CameraSensor
 from src.planners.map_converter import generate_occupancy_grid_from_sim
 from src.planners.global_planning import ZigzagCoveragePlanner, ZigzagCoverageParams
 from src.planners.local_planning import (
@@ -25,7 +27,7 @@ from src.planners.local_planning import (
 )
 
 
-def _resolve_detection_camera(sensor_suite: SensorSuite, block: dict, key: str):
+def _resolve_detection_camera(sensor_suite: SensorSuite, block: dict, key: str) -> CameraSensor:
     """Resolve + validate the raycast camera a detection product references."""
     name = block.get("camera")
     if not name:
@@ -50,23 +52,38 @@ def _build_detections(config: dict, sim, sensor_suite: SensorSuite, categories: 
     det = config.get("detections")
     if not det:
         return []
+    if not isinstance(det, dict):
+        raise ConfigError("detections: must be a mapping.")
+    extra_det = set(det) - {"bbox2d", "bbox3d"}
+    if extra_det:
+        raise ConfigError(f"detections: unknown key(s): {sorted(extra_det)}")
 
     sensor_suite.raycaster.bind(sim)
     jobs = []
 
     if "bbox2d" in det:
         b = det["bbox2d"]
+        _validate_detection_block(b, "bbox2d", {"camera", "min_box_px", "topic", "schema"})
         cam = _resolve_detection_camera(sensor_suite, b, "bbox2d")
         jobs.append(("bbox2d", BBox2DExtractor(cam, categories, int(b.get("min_box_px", 8))), cam))
 
     if "bbox3d" in det:
         b = det["bbox3d"]
+        _validate_detection_block(b, "bbox3d", {"camera", "topic", "schema"})
         cam = _resolve_detection_camera(sensor_suite, b, "bbox3d")
-        geometry = config.get("raycasting", {}).get("geometry", "visual")
+        geometry = RaycastingConfig.from_config(config).geometry
         scene_model = extract_scene_model(sim, geometry)
         jobs.append(("bbox3d", BBox3DExtractor(cam, scene_model, categories), cam))
 
     return jobs
+
+
+def _validate_detection_block(block: dict, key: str, allowed: set[str]) -> None:
+    if not isinstance(block, dict):
+        raise ConfigError(f"detections.{key}: must be a mapping.")
+    extra = set(block) - allowed
+    if extra:
+        raise ConfigError(f"detections.{key}: unknown key(s): {sorted(extra)}")
 
 
 def _agent_start_pose(sim: habitat_sim.Simulator) -> Pose3D:
@@ -201,9 +218,9 @@ def build_pipeline(
     planner.set_waypoints(waypoints, start_pose=start_pose)
 
     duration_ns = planner.duration_ns
-    max_duration_sec = config.get("max_duration_sec", None)
-    if max_duration_sec is not None:
-        duration_ns = min(duration_ns, int(float(max_duration_sec) * 1e9))
+    max_duration_ns = max_duration_ns_from_config(config)
+    if max_duration_ns is not None:
+        duration_ns = min(duration_ns, max_duration_ns)
 
     scene_markers = extract_visual_map_as_markers(sim, config)
     categories = build_category_names(sim)

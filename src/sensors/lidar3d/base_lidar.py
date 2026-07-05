@@ -6,6 +6,8 @@ import magnum as mn
 import habitat_sim
 from typing import Optional, Any
 from src.sensors.base_sensor import BaseSensor
+from src.datatypes.motion_state import MotionState
+from src.datatypes.observation import PointCloudObservation
 
 class LiDAR3D(BaseSensor, abc.ABC):
     """
@@ -64,17 +66,14 @@ class LiDAR3D(BaseSensor, abc.ABC):
     def get_observation(
         self,
         sim: habitat_sim.Simulator,
-        agent_state: habitat_sim.AgentState,
+        motion_state: MotionState,
         tf_manager: Any,
-        timestamp_ns: int
-    ) -> dict:
+    ) -> PointCloudObservation:
         """
         Generate sensor observations.
 
         Returns:
-            dict containing:
-                {name}: A PointCloud (local sensor frame) built from the
-                    range/semantic ray-cast images.
+            A PointCloudObservation in the local sensor frame.
         """
         pass
 

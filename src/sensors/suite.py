@@ -3,6 +3,7 @@ import habitat_sim
 
 from src.utils.tf import TFManager
 from src.datatypes.motion_state import MotionState
+from src.datatypes.observation import SensorObservation
 from src.sensors.base_sensor import BaseSensor
 from src.sensors.registry import get_sensor_class
 from src.robot_config import RobotBundle, SensorSpec
@@ -131,7 +132,7 @@ class SensorSuite:
         sensors: List[BaseSensor],
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, SensorObservation]:
         """
         Fetches observations from the given sensors at the current motion state.
 
@@ -143,7 +144,7 @@ class SensorSuite:
         self.raycaster.bind(sim)
         self.raycaster.sync(sim)
 
-        observations: Dict[str, Any] = {}
+        observations: Dict[str, SensorObservation] = {}
         for sensor in sensors:
             observations[sensor.name] = sensor.get_observation(
                 sim, motion_state, self.tf_manager

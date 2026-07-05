@@ -4,6 +4,7 @@ import numpy as np
 from src.datatypes.pose import Pose3D
 from src.datatypes.motion_state import MotionState
 from src.datatypes.point_cloud import PointCloud
+from src.datatypes.observation import CameraObservation, ImuObservation, PointCloudObservation
 from src.pipeline.sink import StreamContext, StreamEvent
 from src.visualization.backend import VisualizationBackend
 from src.visualization.visualization_sink import VisualizationSink, _normalize_vertex_colors
@@ -172,10 +173,10 @@ class TestVisualizationSink(unittest.TestCase):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
         imu = _FakeSensor("imu", "imu", "imu_link")
-        obs = {"imu": {
-            "imu_angular_velocity": np.array([0.1, 0.2, 0.3]),
-            "imu_linear_acceleration": np.array([0.4, 0.5, 0.6]),
-        }}
+        obs = {"imu": ImuObservation(
+            angular_velocity=np.array([0.1, 0.2, 0.3]),
+            linear_acceleration=np.array([0.4, 0.5, 0.6]),
+        )}
         sink.on_event(_event([imu], obs))
 
         self.assertIn(("set_time", 1000), backend.calls)
@@ -187,7 +188,9 @@ class TestVisualizationSink(unittest.TestCase):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
         lidar = _fake_lidar()
-        obs = {"lidar": PointCloud(points=np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32))}
+        obs = {"lidar": PointCloudObservation(
+            PointCloud(points=np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32))
+        )}
         sink.on_event(_event([lidar], obs))
 
         self.assertEqual(backend.paths("points"), ["world/robot/lidar_link/points"])
@@ -196,7 +199,7 @@ class TestVisualizationSink(unittest.TestCase):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
         cam = _FakeSensor("cam", "camera", "camera_link")
-        sink.on_event(_event([cam], {"cam": {"cam": np.zeros((4, 4, 3))}}))
+        sink.on_event(_event([cam], {"cam": CameraObservation(np.zeros((4, 4, 3)), "rgb")}))
 
         # No spatial/scalar sensor logging for an unsupported type; no error.
         self.assertEqual(backend.kinds().count("points"), 0)
@@ -214,7 +217,7 @@ class TestVisualizationSink(unittest.TestCase):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
         lidar = _fake_lidar()
-        obs = {"lidar": PointCloud(points=np.empty((0, 3), dtype=np.float32))}
+        obs = {"lidar": PointCloudObservation(PointCloud(points=np.empty((0, 3), dtype=np.float32)))}
         sink.on_event(_event([lidar], obs))
         self.assertEqual(backend.kinds().count("points"), 0)
 

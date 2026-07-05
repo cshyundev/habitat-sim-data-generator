@@ -26,6 +26,7 @@ import numpy as np
 
 from src.raycasting.backend import RaycastBackend, SimRaycastBackend
 from src.raycasting.types import RaycastResult
+from src.runtime_config import RaycastingConfig
 
 
 class RayCaster:
@@ -42,22 +43,19 @@ class RayCaster:
     @staticmethod
     def _build_backend(config: dict) -> RaycastBackend:
         """Select and construct the backend from ``config['raycasting']``."""
-        rc = (config or {}).get("raycasting", {}) or {}
-        backend = str(rc.get("backend", "sim")).lower()
-        if backend == "sim":
+        rc = RaycastingConfig.from_config(config or {})
+        if rc.backend == "sim":
             return SimRaycastBackend()
-        if backend in ("gpu", "mlx"):
+        if rc.backend in ("gpu", "mlx"):
             # Imported here so a sim-only deployment never needs the GPU stack.
             from src.raycasting.mlx_backend import MLXRaycaster
 
             return MLXRaycaster(
-                leaf_size=int(rc.get("leaf_size", 8)),
-                geometry=str(rc.get("geometry", "collision")).lower(),
-                dynamic=bool(rc.get("dynamic", False)),
+                leaf_size=rc.leaf_size,
+                geometry=rc.geometry,
+                dynamic=rc.dynamic,
             )
-        raise ValueError(
-            f"Unknown raycasting backend {backend!r}; expected 'sim' or 'gpu'."
-        )
+        raise AssertionError(f"validated unknown raycasting backend: {rc.backend}")
 
     # ------------------------------------------------------------------
     def bind(self, sim) -> None:

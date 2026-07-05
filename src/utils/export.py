@@ -8,6 +8,7 @@ from src.datatypes.pose import Pose3D
 from src.datatypes.point_cloud import PointCloud
 from src.datatypes.laser_scan import LaserScan
 from src.datatypes.bbox import Detection2D, OBB3D
+from src.runtime_config import McapExportConfig
 from src.utils.ros_msgdefs import MSGDEFS
 
 
@@ -148,14 +149,9 @@ class McapExporter:
         self.writer = Ros2Writer(self.file)
 
         # Register channels defined in config["mcap_export"]["channels"]
-        channels_config = self.config.get("mcap_export", {}).get("channels", {})
-        for key, val in channels_config.items():
-            topic = val.get("topic")
-            schema_name = val.get("schema")
-            if not topic or not schema_name:
-                continue
-
-            self.register_channel_dynamic(key, topic, schema_name)
+        export_config = McapExportConfig.from_config(self.config)
+        for key, val in export_config.channels.items():
+            self.register_channel_dynamic(key, val.topic, val.schema)
 
     def register_channel_dynamic(self, key: str, topic: str, schema_name: str) -> None:
         """Dynamically registers a schema and channel for sensor output if not already present."""

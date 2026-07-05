@@ -5,6 +5,7 @@ from typing import Any, Optional, Dict
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.pose import Pose3D
 from src.datatypes.motion_state import MotionState
+from src.datatypes.observation import ImuObservation
 from src.sensors.registry import register_sensor
 
 
@@ -88,15 +89,13 @@ class IdealIMU(BaseSensor):
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
         tf_manager: Any
-    ) -> Dict[str, Any]:
+    ) -> ImuObservation:
         """
         Returns gyroscope and accelerometer readings in the IMU sensor frame.
 
         Returns:
-            {
-                f"{name}_angular_velocity": (3,) float32 [rad/s] (IMU frame),
-                f"{name}_linear_acceleration": (3,) float32 [m/s^2] (IMU frame),
-            }
+            ImuObservation with angular velocity [rad/s] and linear acceleration
+            [m/s^2] in this IMU frame.
         """
         omega_base = np.asarray(motion_state.angular_velocity_body, dtype=np.float64)
         accel_base = np.asarray(motion_state.linear_acceleration_body, dtype=np.float64)
@@ -122,7 +121,7 @@ class IdealIMU(BaseSensor):
         omega_imu = imu_R_base @ omega_base
         accel_imu = imu_R_base @ accel_at_imu
 
-        return {
-            f"{self.name}_angular_velocity": omega_imu.astype(np.float32),
-            f"{self.name}_linear_acceleration": accel_imu.astype(np.float32),
-        }
+        return ImuObservation(
+            angular_velocity=omega_imu,
+            linear_acceleration=accel_imu,
+        )
