@@ -206,7 +206,7 @@ class McapExporter:
         })
 
     def write_point_cloud(
-        self, timestamp_ns: int, frame_id: str,
+        self, timestamp_ns: int, frame_id: str, channel_key: str,
         cloud: PointCloud
     ) -> None:
         """Writes PointCloud2 message."""
@@ -234,7 +234,7 @@ class McapExporter:
             raw_data = pts.tobytes()
             point_step = 12
 
-        self._write("point_cloud", timestamp_ns, {
+        self._write(channel_key, timestamp_ns, {
             "header": _header(timestamp_ns, frame_id),
             "height": 1,
             "width": n,
@@ -247,7 +247,7 @@ class McapExporter:
         })
 
     def write_laser_scan(
-        self, timestamp_ns: int, frame_id: str,
+        self, timestamp_ns: int, frame_id: str, channel_key: str,
         scan: LaserScan
     ) -> None:
         """Writes LaserScan message."""
@@ -255,7 +255,7 @@ class McapExporter:
             np.asarray(scan.semantic_ids, dtype=np.float32).tolist()
             if scan.semantic_ids is not None else []
         )
-        self._write("laser_scan", timestamp_ns, {
+        self._write(channel_key, timestamp_ns, {
             "header": _header(timestamp_ns, frame_id),
             "angle_min": float(scan.angle_min),
             "angle_max": float(scan.angle_max),

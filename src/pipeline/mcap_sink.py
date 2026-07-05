@@ -5,10 +5,52 @@ This is the backend's file frontend -- it records everything (occupancy grid,
 3D scene, static TF, per-event pose/TF, and all sensor observations), reusing
 the existing McapExporter and export_helper.
 """
+import os
+
+import numpy as np
+import yaml
+
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
 from src.utils.export import McapExporter
 from src.utils.coords import habitat_to_ros_pose, habitat_to_ros_obb, convert_occupancy_grid_to_ros
 from src.sensors.export_helper import export_sensor_data
+
+
+def _sidecar_path(mcap_path: str, suffix: str) -> str:
+    root, _ext = os.path.splitext(mcap_path)
+    return f"{root}.{suffix}.yaml"
+
+
+def _yaml_safe(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, tuple):
+        return [_yaml_safe(v) for v in value]
+    if isinstance(value, list):
+        return [_yaml_safe(v) for v in value]
+    if isinstance(value, dict):
+        return {_yaml_safe(k): _yaml_safe(v) for k, v in value.items()}
+    return value
+
+
+def collect_camera_calibrations(sensors) -> list:
+    calibrations = []
+    for sensor in sensors:
+        if getattr(sensor, "sensor_type", None) != "camera":
+            continue
+        if hasattr(sensor, "calibration_dict"):
+            calibrations.append(sensor.calibration_dict())
+    return _yaml_safe(calibrations)
+
+
+def write_sidecar_yaml(path: str, payload: dict) -> None:
+    dir_name = os.path.dirname(path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
+    with open(path, "w") as f:
+        yaml.safe_dump(_yaml_safe(payload), f, sort_keys=True)
 
 
 class McapSink(StreamSink):
@@ -29,6 +71,22 @@ class McapSink(StreamSink):
             self.exporter.register_channel_dynamic(
                 key=sensor.name, topic=sensor.topic, schema_name=sensor.schema
             )
+
+        write_sidecar_yaml(
+            _sidecar_path(self.mcap_path, "calibration"),
+            {
+                "format": "habitat-sim-data-generator.camera_calibration.v1",
+                "cameras": collect_camera_calibrations(ctx.sensors),
+            },
+        )
+        write_sidecar_yaml(
+            _sidecar_path(self.mcap_path, "metadata"),
+            {
+                "format": "habitat-sim-data-generator.metadata.v1",
+                "semantic_categories": ctx.category_names or {},
+                "config_snapshot": ctx.config,
+            },
+        )
 
         # Dynamic /det/bbox2d, /det/bbox3d channels -- decoupled per product,
         # only registered when its config block is present (mirrors

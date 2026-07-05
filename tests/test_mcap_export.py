@@ -6,10 +6,12 @@ import tempfile
 import unittest
 
 import numpy as np
+import yaml
 from mcap.reader import make_reader
 from mcap_ros2.decoder import DecoderFactory
 
 from src.utils.export import McapExporter
+from src.pipeline.mcap_sink import collect_camera_calibrations, write_sidecar_yaml, _sidecar_path
 from src.datatypes.pose import Pose3D
 from src.datatypes.point_cloud import PointCloud
 from src.datatypes.laser_scan import LaserScan
@@ -19,8 +21,6 @@ _CHANNELS_CONFIG = {
     "mcap_export": {
         "channels": {
             "pose": {"topic": "/pose", "schema": "geometry_msgs/msg/PoseStamped"},
-            "point_cloud": {"topic": "/lidar", "schema": "sensor_msgs/msg/PointCloud2"},
-            "laser_scan": {"topic": "/laser", "schema": "sensor_msgs/msg/LaserScan"},
             "occupancy_grid": {"topic": "/map", "schema": "nav_msgs/msg/OccupancyGrid"},
             "map_3d_marker_array": {"topic": "/map_3d", "schema": "visualization_msgs/msg/MarkerArray"},
             "tf_static": {"topic": "/tf_static", "schema": "tf2_msgs/msg/TFMessage"},
@@ -45,6 +45,12 @@ class TestMcapExportRoundTrip(unittest.TestCase):
         exp.register_channel_dynamic("imu", "/imu", "sensor_msgs/msg/Imu")
         exp.register_channel_dynamic("det_bbox2d", "/det/bbox2d", "habitat_msgs/msg/Detection2DArray")
         exp.register_channel_dynamic("det_bbox3d", "/det/bbox3d", "habitat_msgs/msg/Detection3DArray")
+        # Two lidars, each with its own per-sensor channel (regression guard for
+        # the old bug where write_point_cloud always wrote to a single shared
+        # "point_cloud" key, so a second lidar would collide onto one topic).
+        exp.register_channel_dynamic("lidar_3d", "/lidar", "sensor_msgs/msg/PointCloud2")
+        exp.register_channel_dynamic("lidar_3d_2", "/lidar2", "sensor_msgs/msg/PointCloud2")
+        exp.register_channel_dynamic("laser_2d", "/laser", "sensor_msgs/msg/LaserScan")
 
         pose = Pose3D(position=np.array([1.0, 2.0, 3.0]), orientation=np.array([0.0, 0.0, 0.0, 1.0]))
         exp.write_pose(1_000_000_000, "map", pose)
@@ -52,11 +58,14 @@ class TestMcapExportRoundTrip(unittest.TestCase):
         exp.write_dynamic_tf(1_000_000_000, "map", "base_link", pose)
 
         cloud = PointCloud(points=np.random.rand(50, 3).astype(np.float32), semantic_ids=np.arange(50, dtype=np.uint32))
-        exp.write_point_cloud(1_000_000_000, "lidar_link", cloud)
+        exp.write_point_cloud(1_000_000_000, "lidar_link", "lidar_3d", cloud)
+
+        cloud2 = PointCloud(points=np.random.rand(7, 3).astype(np.float32))
+        exp.write_point_cloud(1_000_000_000, "lidar_link_2", "lidar_3d_2", cloud2)
 
         scan = LaserScan(ranges=np.random.rand(20).astype(np.float32), angle_min=-1.0, angle_max=1.0,
                           angle_increment=0.1, range_min=0.1, range_max=10.0, semantic_ids=np.arange(20, dtype=np.uint32))
-        exp.write_laser_scan(1_000_000_000, "laser_link", scan)
+        exp.write_laser_scan(1_000_000_000, "laser_link", "laser_2d", scan)
 
         img = (np.random.rand(4, 5, 3) * 255).astype(np.uint8)
         exp.write_image(1_000_000_000, "camera_link", "camera_rgb", img, "rgb8")
@@ -119,6 +128,12 @@ class TestMcapExportRoundTrip(unittest.TestCase):
         self.assertEqual(cloud.point_step, 16)
         self.assertEqual(len(cloud.data), 50 * 16)
 
+        # Second lidar on its own topic -- must not collide with the first.
+        cloud2 = by_topic["/lidar2"]
+        self.assertEqual(cloud2.width, 7)
+        self.assertEqual(cloud2.point_step, 12)
+        self.assertEqual(len(cloud2.data), 7 * 12)
+
         scan = by_topic["/laser"]
         self.assertEqual(len(scan.ranges), 20)
         self.assertEqual(len(scan.intensities), 20)
@@ -151,6 +166,40 @@ class TestMcapExportRoundTrip(unittest.TestCase):
         det3d = by_topic["/det/bbox3d"].detections[0]
         self.assertEqual(det3d.class_name, "chair")
         self.assertAlmostEqual(det3d.center.z, 3.0, places=5)
+
+
+class _FakeCamera:
+    sensor_type = "camera"
+
+    def calibration_dict(self):
+        return {
+            "name": "cam",
+            "camera_model": {
+                "image_size": (640, 480),
+                "dist_coeffs": np.array([0.1, 0.0, 0.0]),
+            },
+        }
+
+
+class _FakeImu:
+    sensor_type = "imu"
+
+
+class TestMcapSidecars(unittest.TestCase):
+    def test_camera_calibration_sidecar_is_yaml_safe(self):
+        data = collect_camera_calibrations([_FakeCamera(), _FakeImu()])
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["camera_model"]["image_size"], [640, 480])
+        self.assertEqual(data[0]["camera_model"]["dist_coeffs"], [0.1, 0.0, 0.0])
+
+    def test_write_sidecar_yaml_next_to_mcap(self):
+        with tempfile.TemporaryDirectory() as td:
+            mcap_path = os.path.join(td, "sample.mcap")
+            sidecar = _sidecar_path(mcap_path, "metadata")
+            write_sidecar_yaml(sidecar, {"semantic_categories": {1: "chair"}})
+            with open(sidecar) as f:
+                loaded = yaml.safe_load(f)
+        self.assertEqual(loaded["semantic_categories"], {1: "chair"})
 
 
 if __name__ == "__main__":

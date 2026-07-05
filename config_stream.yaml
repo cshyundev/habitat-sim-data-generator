@@ -70,18 +70,16 @@ detections:
     schema: habitat_msgs/msg/Detection3DArray
 
 
-# MCAP Export configurations mapping data types to topics & schemas
+# MCAP Export configurations mapping data types to topics & schemas.
+# Per-sensor channels (lidar3d/camera/imu point_cloud, image, laser scan...)
+# are NOT listed here -- each sensor gets its own dynamic channel keyed by
+# name, with topic/schema sourced from robot.sensors (config/sensors.yaml).
+# Only the pipeline-level (non-sensor) channels are static config.
 mcap_export:
   channels:
     pose:
       topic: "/pose"
       schema: "geometry_msgs/msg/PoseStamped"
-    point_cloud:
-      topic: "/lidar"
-      schema: "sensor_msgs/msg/PointCloud2"
-    laser_scan:
-      topic: "/laser"
-      schema: "sensor_msgs/msg/LaserScan"
     occupancy_grid:
       topic: "/map"
       schema: "nav_msgs/msg/OccupancyGrid"

@@ -22,6 +22,7 @@ class StreamContext:
     scene_markers: List[dict]
     tf_manager: Any
     sensors: List[BaseSensor]
+    category_names: Dict[int, str] = None
 
 
 @dataclass

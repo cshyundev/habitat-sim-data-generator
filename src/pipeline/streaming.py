@@ -41,7 +41,7 @@ def _resolve_detection_camera(sensor_suite: SensorSuite, block: dict, key: str):
     return cam
 
 
-def _build_detections(config: dict, sim, sensor_suite: SensorSuite):
+def _build_detections(config: dict, sim, sensor_suite: SensorSuite, categories: dict):
     """Build the (optional) DECOUPLED detection jobs from the `detections` config.
 
     Returns a list of ``(key, extractor, camera)``; 2D and 3D are independent and
@@ -52,7 +52,6 @@ def _build_detections(config: dict, sim, sensor_suite: SensorSuite):
         return []
 
     sensor_suite.raycaster.bind(sim)
-    categories = build_category_names(sim)
     jobs = []
 
     if "bbox2d" in det:
@@ -93,6 +92,7 @@ class StreamingPipeline:
         scene_markers: List[dict],
         duration_ns: int,
         detectors=None,
+        category_names=None,
     ):
         self.config = config
         self.sim = sim
@@ -103,6 +103,7 @@ class StreamingPipeline:
         self.duration_ns = duration_ns
         # List of (key, extractor, camera); each runs when its camera fires.
         self.detectors = detectors or []
+        self.category_names = category_names or {}
 
     def run(self, sinks: List[StreamSink]) -> int:
         """
@@ -116,6 +117,7 @@ class StreamingPipeline:
             scene_markers=self.scene_markers,
             tf_manager=self.sensor_suite.tf_manager,
             sensors=self.sensor_suite.sensors,
+            category_names=self.category_names,
         )
 
         event_count = 0
@@ -204,7 +206,8 @@ def build_pipeline(
         duration_ns = min(duration_ns, int(float(max_duration_sec) * 1e9))
 
     scene_markers = extract_visual_map_as_markers(sim, config)
-    detectors = _build_detections(config, sim, sensor_suite)
+    categories = build_category_names(sim)
+    detectors = _build_detections(config, sim, sensor_suite, categories)
 
     return StreamingPipeline(
         config=config,
@@ -215,4 +218,5 @@ def build_pipeline(
         scene_markers=scene_markers,
         duration_ns=duration_ns,
         detectors=detectors,
+        category_names=categories,
     )

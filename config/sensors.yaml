@@ -75,4 +75,5 @@ sensors:
     hz: 100
     topic: /imu
     schema: sensor_msgs/msg/Imu
-    parameters: {}
+    parameters:
+      include_gravity: true

@@ -6,7 +6,6 @@ import magnum as mn
 import habitat_sim
 from typing import Optional, Any
 from src.sensors.base_sensor import BaseSensor
-from src.datatypes.pose import Pose3D
 
 class LiDAR3D(BaseSensor, abc.ABC):
     """
@@ -40,12 +39,11 @@ class LiDAR3D(BaseSensor, abc.ABC):
         )
         self.uuid = name
         
-        # Resolve static pose offset from base_link to sensor's parent_link
-        base_link = "base_link"
-        try:
-            self.pose = tf_manager.get_relative_pose(base_link, parent_link)
-        except Exception:
-            self.pose = Pose3D(np.zeros(3), np.array([0.0, 0.0, 0.0, 1.0]))
+        # Resolve static pose offset from base_link to sensor's parent_link.
+        # No silent fallback: an unresolvable parent_link is a config error, not
+        # a recoverable one -- masking it here would silently mount the sensor
+        # at identity and produce plausible-looking but wrong ground truth.
+        self.pose = tf_manager.get_relative_pose("base_link", parent_link)
             
         self.position = mn.Vector3(self.pose.position[0], self.pose.position[1], self.pose.position[2])
         self.orientation = mn.Quaternion(mn.Vector3(self.pose.orientation[0], self.pose.orientation[1], self.pose.orientation[2]), self.pose.orientation[3])

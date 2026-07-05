@@ -26,7 +26,9 @@ def export_sensor_data(
         return
         
     if sensor.sensor_type == "lidar3d":
-        cloud = observation  # PointCloud, already in local sensor frame
+        if sensor.name not in observation:
+            return
+        cloud = observation[sensor.name]
         if cloud is None or cloud.size == 0:
             return
 
@@ -36,6 +38,7 @@ def export_sensor_data(
         exporter.write_point_cloud(
             timestamp_ns=timestamp_ns,
             frame_id=sensor.parent_link,
+            channel_key=sensor.name,
             cloud=ros_cloud
         )
         

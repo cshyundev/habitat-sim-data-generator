@@ -5,7 +5,6 @@ import habitat_sim
 from typing import Any, Optional, Dict
 
 from src.sensors.base_sensor import BaseSensor
-from src.datatypes.pose import Pose3D
 from src.datatypes.motion_state import MotionState
 from src.sensors.camera.models import (
     Camera,
@@ -24,6 +23,20 @@ from src.sensors.registry import register_sensor
 _HABITAT_NATIVE_RGB = {"pinhole", "equirectangular", "orthographic"}
 # Models treated as a perspective/pinhole pipeline (planar z-depth default).
 _PINHOLE_LIKE = {"pinhole", "perspective"}
+
+
+def _as_builtin(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, tuple):
+        return [_as_builtin(v) for v in value]
+    if isinstance(value, list):
+        return [_as_builtin(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _as_builtin(v) for k, v in value.items()}
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
 
 
 @register_sensor("camera")
@@ -79,11 +92,10 @@ class CameraSensor(BaseSensor):
         self.max_distance = float(parameters.get("max_distance", 100.0))
 
         # Resolve static offset pose from base_link to this sensor's parent_link.
-        base_link = "base_link"
-        try:
-            self.pose = tf_manager.get_relative_pose(base_link, parent_link)
-        except Exception:
-            self.pose = Pose3D(np.zeros(3), np.array([0.0, 0.0, 0.0, 1.0]))
+        # No silent fallback: an unresolvable parent_link is a config error, not
+        # a recoverable one -- masking it here would silently mount the sensor
+        # at identity and produce plausible-looking but wrong ground truth.
+        self.pose = tf_manager.get_relative_pose("base_link", parent_link)
 
         self.position = mn.Vector3(
             self.pose.position[0], self.pose.position[1], self.pose.position[2]
@@ -226,6 +238,39 @@ class CameraSensor(BaseSensor):
         self._ray_valid = np.asarray(valid).reshape(-1)
         # Cosine to optical axis (CV +Z) for planar z-depth conversion.
         self._ray_cos = rays_cv[2, :].astype(np.float64)
+
+    def calibration_dict(self) -> Dict[str, Any]:
+        """
+        Returns a sidecar-friendly calibration record for this camera.
+
+        The project supports projection models that do not map cleanly onto
+        ROS ``sensor_msgs/CameraInfo`` fields, so calibration is exported as
+        structured YAML beside the MCAP rather than as a lossy ROS channel.
+        """
+        cam = self.cam
+        if cam is None and self.model != "orthographic":
+            cam = self._build_model()
+
+        model_data = cam.export_cam_dict() if cam is not None else {
+            "cam_type": self.model.upper(),
+            "image_size": [self.width, self.height],
+        }
+        return _as_builtin({
+            "name": self.name,
+            "frame_id": self.parent_link,
+            "topic": self.topic,
+            "schema": self.schema,
+            "modality": self.modality,
+            "model": self.model,
+            "width": self.width,
+            "height": self.height,
+            "hfov": self.hfov,
+            "min_distance": self.min_distance,
+            "max_distance": self.max_distance,
+            "depth_type": self.depth_type,
+            "camera_model": model_data,
+            "parameters": self.parameters,
+        })
 
     # ------------------------------------------------------------------
     # Quaternion helper (unchanged from the original implementation)
