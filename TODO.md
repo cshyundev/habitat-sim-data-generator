@@ -1,177 +1,185 @@
-# Code Review Action List
+# Code Review Action List (Round 2)
 
-Ordered by priority: decisions/fixes that affect other code first, then critical
-correctness, then architecture refactors, then isolated/minor items and new
-features last. Work top-down.
+Second-pass review after the Round 1 refactor landed. Overall structure is much
+improved (sink fan-out, sensor/planner registries, self-describing MCAP via
+`mcap_ros2`). The sensor/planner abstraction level is intentional and kept —
+more motion setups and sensor types are planned. This round's themes are
+refactoring leftovers (dead code, stale comments), validated config being
+discarded and re-parsed as raw dicts, and duplicated camera/detections logic.
+
+Ordered by priority. Work top-down.
 
 ---
 
-## P0 — Decisions & fixes that gate other work
+## P0 — Bugs
 
-### 1. ~~Adopt `mcap-ros2-support` for serialization (decision gate)~~ DONE
-**Cause:** Schemas are registered with `data=b""`, so the MCAP is not
-self-describing — no standard tool (Foxglove, rosbag2) can decode it. ~650
-lines of hand-rolled CDR in `src/utils/export.py` + ~630 mirrored deserializer
-lines in `visualize_mcap_rerun.py` exist only to compensate. The library is
-already in `pyproject.toml`, unused.
-**Resolution:** `McapExporter` now writes real ROS 2 `.msg` text via
-`mcap_ros2.writer.Writer` (new `src/utils/ros_msgdefs.py`); every hand-rolled
-`serialize_*`/`deserialize_*` function is gone. `visualize_mcap_rerun.py`
-decodes through `mcap_ros2.decoder.DecoderFactory` instead of its own parser.
-Verified: full pipeline run decoded end-to-end by an independent
-`mcap_ros2` reader (real RGB/depth/IMU/occupancy-grid/3D-map data), all
-schemas confirmed non-empty. Also resolved item 2 as a natural side effect
-(see below). `to_cdr_bytes` dead methods removed from `PointCloud`/`LaserScan`.
+### 1. `to_point_cloud` crashes on an all-miss frame (NameError)
+**Where:** `src/sensors/lidar3d/base_lidar.py:101`
+**Cause:** the empty-return path references `semantic_image`, a variable that
+does not exist in this scope (leftover from a removed parameter):
+```python
+if not np.any(valid_mask):
+    return np.empty((0, 4 if semantic_image is not None else 3), dtype=np.float32)
+```
+Any lidar frame where every ray misses (open space, max-range scene) raises
+NameError. Fix: return shape `(0, 3)` unconditionally.
 
-### 2. ~~Fix detection channels lying about their schema~~ DONE (via item 1)
-**Cause:** `/det/bbox2d`, `/det/bbox3d` claim `vision_msgs/msg/Detection2DArray`
-/`Detection3DArray` but write a custom payload; any consumer trusting the
-schema name misparses. Either serialize the real vision_msgs layout (natural
-with item 1) or rename to an honest custom schema.
-**Resolution:** Renamed to project-owned `habitat_msgs/msg/Detection2DArray`
-/`Detection3DArray` with real, matching `.msg` definitions in
-`src/utils/ros_msgdefs.py`; `config_stream.yaml` updated.
+### 2. "Imported lazily" comment on RerunBackend is false
+**Where:** `stream_data.py:23` (import) vs `stream_data.py:68` (comment)
+**Cause:** `RerunBackend` is imported at module top, and
+`src/visualization/rerun_backend.py` imports `rerun` at module level — so the
+data-only path (`--no-mcap`-less default run) still requires rerun installed,
+contradicting the inline comment. Fix: move the import inside
+`if args.visualize:` (making the comment true), or drop the comment.
 
-### 3. ~~Remove silent TF fallback in sensors (data corruption)~~
-**Cause:** `camera.py:83-86` (and `base_lidar.py:47`) swallow TF lookup
-failure and mount the sensor at identity pose. A mis-keyed `parent_link`
-produces plausible-looking but wrong ground truth. Contradicts the stated
-"no silent fallbacks" policy in `config/sensors.yaml`. Simple fix: crash loudly.
+## P1 — Duplicated logic / responsibility leaks
 
-### 4. ~~Unify the MCAP channel-key model~~
-**Cause:** Cameras/IMU get per-sensor dynamic channels, but
-`write_point_cloud`/`write_laser_scan` hardcode the static `"point_cloud"` /
-`"laser_scan"` keys — a second lidar silently collides onto one topic, and the
-per-sensor `topic`/`schema` in `sensors.yaml` is ignored for lidar. Affects
-every future sensor addition.
+### 3. Camera vs detections extractors: line-for-line duplication
+**Where:** `src/sensors/camera/camera.py:453-475` (`_bbox2d_from_maps`) vs
+`src/detections/bbox2d.py` (`BBox2DExtractor.extract`); and
+`camera.py:522-533` (bbox3d block) vs `src/detections/bbox3d.py`
+(`BBox3DExtractor.extract`).
+**Cause:** the camera inlined the extractor logic (down to the same bincount
+loop), and the extractors are now used only by `scripts/` and tests. Two copies
+of the same algorithm means one-sided fixes are guaranteed eventually. Either
+have the camera delegate to the extractors, or delete the extractors and point
+the scripts at the camera path.
 
-## P1 — Critical correctness for the SLAM/reconstruction purpose
+### 4. Validated `RuntimeConfig` is discarded; raw dict re-parsed downstream
+**Where:** `stream_data.py:45` creates `RuntimeConfig` then only logs from it.
+**Cause:** every layer below re-parses the same sections from the raw dict:
+- `McapExportConfig.from_config` runs twice on the same path —
+  `McapSink.on_start` (`src/pipeline/mcap_sink.py:97`) and again inside
+  `McapExporter.start` (`src/utils/export.py:152`).
+- `max_duration_ns_from_config` (`src/runtime_config.py:271`) re-validates what
+  `RuntimeConfig.max_duration_sec` already validated.
+- `RaycastingConfig.from_config` re-parsed in `RayCaster` and again in
+  `CameraSensor._ensure_detection_context` (`camera.py:449`).
+Fix: pass `RuntimeConfig` (or its sub-configs) down through
+`build_pipeline`/`McapSink`/`SensorSuite` and delete the dict re-parsing
+helpers. Validate once at the entry point; only typed objects flow after.
 
-### 5. ~~IMU frame inconsistency (`imu_link` ≠ `base_link`)~~ DONE
-**Cause:** `IdealIMU` returns base-body-frame vectors verbatim but stamps them
-`frame_id=imu_link`; missing rotation into the sensor frame and lever-arm terms
-(ω×(ω×r), α×r) when the link is offset. Consistent bias for any VIO consumer.
-**Resolution:** `IdealIMU` now resolves `base_link -> imu_link`, rotates gyro
-and accelerometer vectors into the IMU frame, and applies lever-arm terms for
-offset links. `α×r` is supported when `MotionState` supplies
-`angular_acceleration_body`; current planners do not yet emit that field.
+### 5. Scene mesh loading exists twice (+ a third redundant extraction)
+**Where:** `src/utils/coords.py:202-367` (`extract_visual_map_as_markers`) vs
+`src/raycasting/scene_extractor.py`.
+**Cause:** both resolve asset paths and load stage + rigid + articulated meshes
+via trimesh, into different output shapes. Additionally the camera's bbox3d
+path calls `extract_scene_model` again (`camera.py:450`) even though the MLX
+backend already extracted the same scene in `bind()` — a heavy duplicate pass.
+Fix (larger, separate task): make `SceneModel` the single source and derive
+markers/OBBs from it; at minimum reuse the raycaster's already-built model for
+bbox3d. Related: `coords.py` is a grab-bag — pure coordinate transforms (keep)
+mixed with occupancy conversion, the 165-line marker extractor, and URDF visual
+parsing; the scene logic belongs elsewhere.
 
-### 6. ~~Export camera intrinsics (`sensor_msgs/CameraInfo`)~~ DONE (sidecar)
-**Cause:** No intrinsics anywhere in the MCAP — consumers need the YAML to
-undistort/reproject. The single most important missing channel for
-SLAM/reconstruction. One latched CameraInfo per camera topic. (Do after item 1.)
-**Resolution:** Camera calibration is written next to the MCAP as
-`<output>.calibration.yaml`, because the supported camera models are broader
-than ROS `CameraInfo` can represent without loss.
+### 6. `build_category_names(sim)` computed twice
+**Where:** `src/pipeline/streaming.py:148` (into `StreamContext`) and
+`CameraSensor._ensure_detection_context` (`camera.py:444`).
+**Cause:** the pipeline already owns the category table; inject it into the
+camera instead of rebuilding per sensor.
 
-### 7. ~~Gravity option for the ideal IMU~~ DONE
-**Cause:** Accelerometer excludes gravity by design, but real VIO stacks
-(VINS, ORB-SLAM3) model specific force including gravity — current output
-can't feed them unpatched. Add a config flag, default to physical behavior.
-**Resolution:** `include_gravity` defaults to `true` and can be disabled per IMU
-sensor. Resting IMU output now includes +g specific force in the IMU frame.
+## P2 — Sensor layer boilerplate (do before adding the next sensor)
 
-### 8. ~~RGB/depth mismatch when distortion is configured on a native model~~ SKIPPED (intended)
-**Cause:** Pinhole RGB is rasterized ideal by habitat while depth/semantic
-raycast applies configured `radial`/`tangential` — modalities silently stop
-being pixel-aligned. Reject distortion params for native-RGB models (cheap)
-or remap RGB through the same model (correct).
-**Resolution:** Left unchanged by design; native RGB behavior is intentional.
+### 7. Ten-parameter constructor copy-pasted across every sensor subclass
+**Where:** `camera.py`, `base_lidar.py`, `ideal_lidar.py`, `base_laser.py`,
+`ideal_laser.py`, `ideal_imu.py` — each re-declares the identical `__init__`
+(~30 lines) only to forward everything to `super()`.
+**Fix:** `def __init__(self, **kwargs)` + `super().__init__(**kwargs)`, or pass
+a single spec object. New sensor types then only implement what differs.
 
-### 9. ~~Write semantic category table + config snapshot as MCAP metadata~~ DONE (sidecar)
-**Cause:** Instance/semantic ID images are exported with no id→class mapping;
-the category table lives only in process memory. MCAP metadata records make
-each dataset self-describing and reproducible.
-**Resolution:** Semantic categories and the full config snapshot are written
-next to the MCAP as `<output>.metadata.yaml`, matching the sidecar approach used
-for calibration.
+### 8. `BaseSensor` accepts arguments it admits to discarding
+**Where:** `src/sensors/base_sensor.py:38-40` — docstring: `output_names`/
+`output_params` are "accepted for a uniform constructor but not stored".
+**Cause:** only the camera uses them. An interface documenting that its own
+parameters are ignored is the interface saying it's wrong. Store them on the
+base (as `outputs`) or fold into the spec object from item 7.
 
-## P2 — Architecture refactors
+### 9. `get_observation(..., tf_manager)` parameter is unused by all implementations
+**Where:** every sensor uses `self.pose` / `self.tf_manager` resolved at init;
+the call-site argument is dead. Remove it from the interface and callers.
 
-### 10. ~~Typed observation contract~~ DONE
-**Cause:** Observations are `Dict[str, Any]` with per-sensor private key
-conventions (`{name: img}` vs `{f"{name}_angular_velocity": ...}`);
-`export_helper.py` is a stringly-typed `sensor_type` switch. A typed
-`Observation` union removes the convention coupling between sensors and sinks.
-**Resolution:** Added `src/datatypes/observation.py` with typed observation
-payloads (`CameraObservation`, `PointCloudObservation`, `ImuObservation`, etc.).
-Sensors now return these payloads directly, and export/visualization dispatch
-on observation type instead of private string keys.
+### 10. `raycaster.bind()` called twice per capture
+**Where:** `SensorSuite.observe` (`suite.py:157`) binds/syncs once per capture,
+and each sensor defensively re-binds (`camera.py:426`, `ideal_lidar.py:108`,
+`ideal_laser.py:89`).
+**Fix:** the suite owns bind/sync; backends raise if queried unbound. Also
+remove the write-only `RayCaster._bound` flag (`raycaster.py:42,65`).
 
-### 11. ~~Validate remaining config sections like `robot.*` is validated~~ DONE
-**Cause:** Raw `config: dict` threads through every layer; `mcap_export.*`,
-`raycasting.*`, `max_duration_sec` are ad-hoc `.get()` chains that fail
-silently on typos, while `robot_config.py` shows the validated-dataclass
-pattern already in use.
-**Resolution:** Added `src/runtime_config.py` with validated dataclasses for
-runtime, raycasting, and MCAP export config. `stream_data.py`, `RayCaster`,
-`McapExporter`, and pipeline duration handling now use this validation layer.
+### 11. IdealIMU silent identity-pose fallback
+**Where:** `src/sensors/imu/ideal_imu.py:55-58` — `tf_manager is None` mounts
+the IMU at identity, the exact silent fallback other sensors reject loudly.
+It exists for test convenience; make tests pass a real `TFManager` and delete
+the branch.
 
-### 12. ~~Type the pipeline seams~~ DONE
-**Cause:** `StreamContext.occ_grid: Any`, `tf_manager: Any`,
-`detections: Dict[str, Any] = None` (not even `Optional`), extractors take an
-untyped `camera`. Weak seams hide exactly the frame/contract bugs above.
-**Resolution:** `StreamContext` and `StreamEvent` now type occupancy grids,
-TF protocol, typed observations, and optional detections explicitly. Detection
-camera resolution is annotated against `CameraSensor` and validates detection
-config keys loudly.
+## P3 — Dead code / stale artifacts (safe to delete now)
 
-### 13. ~~CDR alignment boilerplate → small `CdrWriter` helper~~ MOOT
-**Cause:** The align-pad block is copy-pasted ~35 times in `export.py`, while
-an `align_offset()` helper exists and is used once. **Skip entirely if item 1
-removes hand-rolled CDR** — only do this if some custom serialization survives.
-**Resolution:** Item 1 removed all hand-rolled CDR; nothing left to dedupe.
+### 12. Unused modules and helpers
+- `src/utils/visualization.py` (81 lines) — imported by nothing.
+- `src/utils/io.py` (74 lines) — used only by its own `tests/test_io.py`;
+  no pipeline code writes pose CSVs. Delete both (or keep with a real consumer).
+- `tests/run_test.py` — imports nonexistent `tests.test_refactoring`, mocks
+  `coverage`, hardcodes `.venv/lib/python3.10` (venv is 3.11). Cannot run.
+- `src/datatypes/image.py` NewTypes (`RGBImage`, `DepthMap`, `SemanticMap`,
+  `InstanceMap`) — only re-exported from `__init__`, never referenced. Note:
+  TODO Round 1 item 10 claimed `src/datatypes/observation.py` was added; that
+  file does not exist — the record overstated what landed. Either use the
+  aliases in sensor/sink signatures or delete them.
+- `RaycastResult.range_image()` / `semantic_image()`
+  (`src/raycasting/types.py`) — sensors reshape manually; unused.
+- `BaseLocalPlanner.is_finished()` — unused.
 
-## P3 — Minor, isolated fixes
+### 13. Config/doc leftovers
+- `config_stream.yaml` `robot.base_link:` key — read by nothing ("base_link"
+  is hardcoded across sinks/sensors/viz). Remove the key or actually honor it.
+- `config_stream.yaml` header and `CLAUDE.md` reference `generate_data.py` /
+  `config.yaml`, which don't exist in the repo.
+- `config_stream.yaml` raycasting comment says `sim | gpu` but code accepts
+  `mlx` too (`runtime_config.py:194`).
+- `src/pipeline/mcap_sink.py:162` stray draft comment (`# 방식1: ...`) and the
+  missing blank line before `on_finish` (line 175).
 
-### 14. ~~Progress log time off by 10×~~ DONE
-**Cause:** `streaming.py:159` divides by `10e9` (=1e10) instead of `1e9`.
-One-character fix, isolated.
-**Resolution:** Progress logging now divides nanoseconds by `1e9`.
+## P4 — Config schema and smells
 
-### 15. ~~Golden-file test decoding MCAP with an external reader~~ DONE (via item 1)
-**Cause:** CDR writer is only round-tripped against its own mirrored reader —
-shared misunderstandings pass both. Dissolves if item 1 lands; otherwise add
-one test decoding via `mcap-ros2-support`.
-**Resolution:** `tests/test_mcap_export.py` round-trips every channel through
-`mcap_ros2`'s independent decoder and asserts every schema has non-empty data.
+### 14. `McapExportConfig.from_config` juggles two declaration shapes (~105 lines)
+**Where:** `src/runtime_config.py:34-140`.
+**Cause:** sensor channels can be declared nested inside `channels` (detected
+by the absence of a direct `topic` key, guarded by a reserved static-name set)
+OR under a separate `sensor_channels` section that then merges in. Two ways to
+say the same thing forces the parser to police reserved names. Pick one shape
+and delete the merge logic; the function should roughly halve.
 
-### 16. ~~Deduplicate quaternion math via scipy~~ DONE
-**Cause:** `_quaternion_to_euler` and `_rotate_vectors` in `camera.py`
-(duplicated from `IdealLiDAR3D`) reimplement `scipy.spatial.transform.Rotation`,
-already a dependency and already used in `coords.py`.
-**Resolution:** Camera and 3D LiDAR vector rotation now use
-`scipy.spatial.transform.Rotation`; camera Euler conversion also uses scipy.
+### 15. Legacy/dual config read paths (~6 sites) — commit to one schema
+- `modalities` vs `outputs` in sensor specs (`robot_config.py:144-161`).
+- `name` + `robot.sensor_frames` migration path (`robot_config.py:111-115`).
+- Top-level `local_planner` fallback and legacy `planner` params fallback
+  (`planners/registry.py:21-47`, both `params.py` `from_config`s).
+- `apply_gravity` alias for `include_gravity` (`ideal_imu.py:61`).
+- `raycasting` accepted at top level or under `robot`
+  (`runtime_config.py:180-187`).
+Configs live in-repo; keeping silent fallbacks contradicts the stated
+fail-loud policy. Migrate the fixtures, then fail on the legacy keys.
 
-### 17. ~~Audit the 22 `except Exception` blocks~~ DONE
-**Cause:** Beyond item 3's sensors, remaining broad handlers
-(`scene_extractor.py`, `backend.py`, `categories.py`, `zigzag_coverage.py`)
-should each justify swallowing or narrow/log. Mostly guarding optional sim
-APIs — audit, don't blanket-remove.
-**Resolution:** Optional Habitat/asset API failures now log via `logging`
-instead of silent pass/print where practical; category and planner handlers were
-narrowed where their failure modes are known.
+### 16. Silent data drop in export/visualization writers
+**Where:** `src/sensors/export_helper.py:27-30` (and siblings),
+`src/visualization/visualization_sink.py:203-206`.
+**Cause:** `if not isinstance(payload, PointCloud): return` silently skips a
+mistyped payload — a bug surfaces as a quietly empty MCAP channel. Raise
+instead. Also the `if cloud is None` checks after the isinstance guard are
+unreachable; delete.
 
-### 18. ~~Logging + tooling baseline~~ DONE
-**Cause:** `print()` everywhere (incl. "Visualiztion" typo), no ruff/mypy/CI
-configured despite a stray `# pyrefly: ignore` in `coords.py`. Low urgency,
-compounding value.
-**Resolution:** Core library/runner progress and warnings now use `logging`,
-and the visible "Visualiztion" typo is fixed. CLI/diagnostic scripts keep
-`print()` for intentional terminal output.
+### 17. `_observe_raycast` sem/obj recompute dance
+**Where:** `src/sensors/camera/camera.py:492-524` — the
+`np.where(hit, ...).reshape(H, W)` expression appears 3x for `sem`, 4x for
+`obj`, mixed with a `needs_semantic`/`needs_instance` pre-pass plus
+`if sem is None` re-checks. Fold into two lazy local helpers
+(`get_sem()`/`get_obj()`); ~20 lines disappear.
 
-### 19. ~~Repo hygiene~~ DONE
-**Cause:** `read_mcap.py`, `visualize_mcap_rerun.py`, `animate_path.py`,
-`bench_raycast.py` at root while `scripts/` exists; `output_mcap/`,
-`__pycache__/` noise in the tree.
-**Resolution:** Root helper scripts moved into `scripts/`, generated
-`__pycache__` and `output_mcap` directories removed, and existing `.gitignore`
-already covers those generated artifacts.
-
-## P4 — New features
-
-### 20. Injectable trajectory source for VIO-grade excitation
-**Cause:** Zigzag + differential drive gives planar, yaw-only motion — poor
-scale/bias observability for monocular/VIO benchmarks. Planner interface is
-already pluggable; add a 6-DoF trajectory source when SLAM evaluation becomes
-a goal.
+### 18. Minor
+- `robot.py`'s `cylinder_urdf` / `add_robot` / `DEFAULT_*` are used only by
+  tests (the pipeline never instantiates the robot body in the sim). Move to a
+  test helper or document that they are fixtures.
+- `zigzag_coverage.plan` and `plan_from_map` both repeat the same
+  `kwargs.get("wall_distance", p.wall_distance)` override layer.
+- `camera._build_model` re-validates `intrinsic` already validated in
+  `__init__`, and required-param errors surface as raw `KeyError`
+  (`p["radial"]`) instead of a contextual message.
