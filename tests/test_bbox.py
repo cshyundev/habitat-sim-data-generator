@@ -3,22 +3,8 @@ import unittest
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from src.detections import BBox2DExtractor, global_obbs, obb_to_camera
+from src.detections import boxes_from_maps, global_obbs, obb_to_camera
 from src.datatypes.bbox import Detection2D, OBB3D
-
-
-class _FakeCamera:
-    """Stand-in camera: returns fixed id maps and an identity world pose."""
-    def __init__(self, obj, sem):
-        self._obj = obj.astype(np.uint32)
-        self._sem = sem.astype(np.uint32)
-        self.height, self.width = obj.shape
-
-    def cast_ids(self, sim, motion_state):
-        return self._obj, self._sem
-
-    def world_pose(self, motion_state):
-        return np.zeros(3), np.array([0.0, 0.0, 0.0, 1.0])
 
 
 class _FakeMesh:
@@ -43,15 +29,12 @@ CATS = {20: "chair", 29: "cushion"}
 
 
 class TestBox2D(unittest.TestCase):
-    def _extractor(self, obj, sem, min_box_px=8):
-        return BBox2DExtractor(_FakeCamera(obj, sem), CATS, min_box_px)
-
     def test_one_box_per_instance_with_class_and_name(self):
         obj = np.zeros((20, 20), np.uint32)
         obj[2:7, 3:8] = 5           # instance 5 -> rows 2..6, cols 3..7
         sem = np.zeros((20, 20), np.uint32)
         sem[2:7, 3:8] = 20
-        dets = self._extractor(obj, sem, min_box_px=1).extract(None, None)
+        dets = boxes_from_maps(obj, sem, CATS, min_box_px=1)
         self.assertEqual(len(dets), 1)
         d = dets[0]
         self.assertEqual(d.instance_id, 5)
@@ -65,7 +48,7 @@ class TestBox2D(unittest.TestCase):
         sem = np.full((20, 20), 20, np.uint32)
         sem[0:10, 0:10] = 20
         sem[0:2, 0:10] = 29         # minority pixels
-        dets = self._extractor(obj, sem).extract(None, None)
+        dets = boxes_from_maps(obj, sem, CATS)
         self.assertEqual(dets[0].class_id, 20)   # 80 vs 20 pixels
 
     def test_min_box_px_filters_small(self):
@@ -73,14 +56,14 @@ class TestBox2D(unittest.TestCase):
         obj[10:13, 10:13] = 3       # 3x3 instance -> shorter side 3 < 8
         obj[0:10, 0:10] = 4         # 10x10 instance kept
         sem = np.zeros((20, 20), np.uint32)
-        dets = self._extractor(obj, sem, min_box_px=8).extract(None, None)
+        dets = boxes_from_maps(obj, sem, CATS, min_box_px=8)
         self.assertEqual({d.instance_id for d in dets}, {4})
 
     def test_unmapped_class_falls_back_to_numeric_name(self):
         obj = np.zeros((20, 20), np.uint32)
         obj[0:10, 0:10] = 1
         sem = np.full((20, 20), 999, np.uint32)
-        dets = self._extractor(obj, sem).extract(None, None)
+        dets = boxes_from_maps(obj, sem, CATS)
         self.assertEqual(dets[0].class_name, "999")
 
 

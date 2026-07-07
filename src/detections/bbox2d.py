@@ -1,7 +1,7 @@
-"""2D bounding-box extractor (image output), decoupled from 3D.
+"""2D bounding boxes (image output), decoupled from 3D.
 
-Casts the referenced camera once to get per-pixel instance (``object_id``) and
-class (``semantic_id``) maps, then emits one axis-aligned box per instance.
+Given per-pixel instance (``object_id``) and class (``semantic_id``) maps (from
+a camera raycast), emits one axis-aligned box per instance.
 """
 
 from __future__ import annotations
@@ -23,8 +23,9 @@ def boxes_from_maps(
     """Emit one axis-aligned box per instance from per-pixel instance/class maps.
 
     ``obj``/``sem`` are (H, W) maps of ``object_id``/``semantic_id`` (0 = no hit).
-    The single source for the 2D-box algorithm, shared by ``BBox2DExtractor`` and
-    the camera's raycast path (which already holds the maps, so it doesn't re-cast).
+    The single source for the 2D-box algorithm; used directly by the camera's
+    raycast path (which already holds the maps) and by callers that cast their
+    own camera (e.g. ``scripts/visualize_bbox.py``).
     """
     dets: List[Detection2D] = []
     for oid in np.unique(obj):
@@ -47,20 +48,3 @@ def boxes_from_maps(
             )
         )
     return dets
-
-
-class BBox2DExtractor:
-    def __init__(self, camera, categories: Dict[int, str], min_box_px: int = 8):
-        """
-        Args:
-            camera: referenced CameraSensor (raycast modality) -- supplies ``cast_ids``.
-            categories: semantic class id -> name.
-            min_box_px: drop boxes whose shorter side (px) is below this.
-        """
-        self.camera = camera
-        self.categories = categories
-        self.min_box_px = int(min_box_px)
-
-    def extract(self, sim, motion_state) -> List[Detection2D]:
-        obj, sem = self.camera.cast_ids(sim, motion_state)
-        return boxes_from_maps(obj, sem, self.categories, self.min_box_px)

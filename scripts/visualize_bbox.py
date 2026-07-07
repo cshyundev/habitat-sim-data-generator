@@ -24,7 +24,7 @@ from matplotlib.patches import Rectangle  # noqa: E402
 sys.path.insert(0, ".")
 from src.datatypes.motion_state import MotionState  # noqa: E402
 from src.datatypes.pose import Pose3D  # noqa: E402
-from src.detections import BBox2DExtractor, BBox3DExtractor, build_category_names  # noqa: E402
+from src.detections import boxes_from_maps, obbs_for_visible, global_obbs, build_category_names  # noqa: E402
 from src.raycasting import extract_scene_model  # noqa: E402
 from src.robot_config import load_robot  # noqa: E402
 from src.sensors.suite import SensorSuite  # noqa: E402
@@ -89,8 +89,8 @@ def main():
     suite.scene.bind(sim)
     scene_model = extract_scene_model(sim, config.get("raycasting", {}).get("geometry", "visual"))
     cats = build_category_names(sim)
-    ext2d = BBox2DExtractor(inst_cam, cats, det_cfg["bbox2d"].get("min_box_px", 8))
-    ext3d = BBox3DExtractor(inst_cam, scene_model, cats)
+    min_box_px = det_cfg["bbox2d"].get("min_box_px", 8)
+    world_obbs = global_obbs(scene_model, cats)
 
     pos = np.asarray(sim.get_agent(0).get_state().position, dtype=np.float32)
     yaws = [args.yaw] if args.yaw is not None else list(range(0, 360, 45))
@@ -101,8 +101,9 @@ def main():
         sim.get_agent(0).set_state(pose_to_agent_state(Pose3D(ms.position, ms.orientation)))
         rgb = np.asarray(rgb_cam.get_observation(sim, ms, None)[rgb_cam.name])
         obj, sem = inst_cam.cast_ids(sim, ms)
-        boxes2d = ext2d.extract(sim, ms)
-        boxes3d = ext3d.extract(sim, ms)["camera"]
+        boxes2d = boxes_from_maps(obj, sem, cats, min_box_px)
+        cam_pos, cam_quat = inst_cam.world_pose(ms)
+        boxes3d = obbs_for_visible(obj, world_obbs, cam_pos, cam_quat)["camera"]
         if best is None or len(boxes2d) > best[0]:
             best = (len(boxes2d), rgb, obj, sem, boxes2d, boxes3d)
 
