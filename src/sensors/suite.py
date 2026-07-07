@@ -164,9 +164,7 @@ class SensorSuite:
 
         observations: Dict[str, Dict[str, Any]] = {}
         for sensor in sensors:
-            raw_outputs = sensor.get_observation(
-                sim, motion_state, self.tf_manager
-            )
+            raw_outputs = sensor.get_observation(sim, motion_state)
             observations[sensor.name] = self.capture_outputs(sensor, raw_outputs)
         return observations
 

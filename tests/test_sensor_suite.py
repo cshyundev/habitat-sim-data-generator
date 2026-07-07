@@ -230,7 +230,7 @@ class _FakePluginSensor(BaseSensor):
     def get_sensor_spec(self):
         return None
 
-    def get_observation(self, sim, motion_state, tf_manager):
+    def get_observation(self, sim, motion_state):
         return {"sample": "fake_observation"}
 
 
@@ -255,7 +255,7 @@ class TestSensorRegistry(unittest.TestCase):
                 def get_sensor_spec(self):
                     return None
 
-                def get_observation(self, sim, motion_state, tf_manager):
+                def get_observation(self, sim, motion_state):
                     return {}
 
     def test_new_sensor_type_pluggable_without_touching_suite(self):

@@ -65,35 +65,14 @@ class CameraSensor(BaseSensor):
     this class; SensorSuite wraps returned output payloads for export.
     """
 
-    def __init__(
-        self,
-        name: str,
-        sensor_type: str,
-        parent_link: str,
-        hz: int,
-        parameters: dict,
-        tf_manager: Any,
-        scene: Any = None,
-        output_names: Optional[list] = None,
-        output_params: Optional[Dict[str, Dict[str, Any]]] = None,
-    ):
-        super().__init__(
-            name=name,
-            sensor_type=sensor_type,
-            parent_link=parent_link,
-            hz=hz,
-            parameters=parameters,
-            tf_manager=tf_manager,
-            scene=scene,
-            output_names=output_names,
-            output_params=output_params,
-        )
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
-        self.modalities = {str(name).lower() for name in (output_names or [])}
-        self.modality_params = {
-            str(name).lower(): dict(params)
-            for name, params in (output_params or {}).items()
-        }
+        # BaseSensor stores the declared outputs as ``self.outputs``
+        # (lowercased name -> params); the camera reads them by modality name.
+        self.modalities = set(self.outputs)
+        self.modality_params = self.outputs
+        parameters = self.parameters
         self.model = parameters.get("model", "pinhole").lower()
         self.width = int(parameters.get("width", 640))
         self.height = int(parameters.get("height", 480))
@@ -117,7 +96,7 @@ class CameraSensor(BaseSensor):
         # No silent fallback: an unresolvable parent_link is a config error, not
         # a recoverable one -- masking it here would silently mount the sensor
         # at identity and produce plausible-looking but wrong ground truth.
-        self.pose = tf_manager.get_relative_pose("base_link", parent_link)
+        self.pose = self.tf_manager.get_relative_pose("base_link", self.parent_link)
 
         # Depth representation: pinhole-like -> planar z-depth, wide-angle -> euclidean.
         default_depth = "planar" if self.model in _PINHOLE_LIKE else "euclidean"
@@ -362,7 +341,6 @@ class CameraSensor(BaseSensor):
         self,
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-        tf_manager: Any,
     ) -> Dict[str, Any]:
         """
         Returns output payloads keyed by configured camera output name:
@@ -423,7 +401,8 @@ class CameraSensor(BaseSensor):
         if np.any(invalid):
             dirs[invalid] = (0.0, 0.0, -1.0)
 
-        self.scene.bind(sim)  # idempotent; ensures the backend is ready
+        # The Scene is bound/synced once per capture by SensorSuite.observe;
+        # the backend raises if queried unbound.
         origins = np.broadcast_to(sensor_pos_global, dirs.shape)
         res = self.scene.cast_rays(
             origins, dirs,

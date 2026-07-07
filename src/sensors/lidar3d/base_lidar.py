@@ -10,42 +10,22 @@ class LiDAR3D(BaseSensor, abc.ABC):
     """
     Abstract base class for custom 3D LiDAR sensors in habitat-sim.
     """
-    def __init__(
-        self,
-        name: str,
-        sensor_type: str,
-        parent_link: str,
-        hz: int,
-        parameters: dict,
-        tf_manager: Any,
-        scene: Any = None,
-        output_names: Optional[list] = None,
-        output_params: Optional[Dict[str, Dict[str, Any]]] = None,
-    ):
+    def __init__(self, **kwargs):
         """
-        Initialize the base LiDAR sensor.
+        Initialize the base LiDAR sensor. All shared sensor fields are forwarded
+        to :class:`BaseSensor`; this class only adds LiDAR-specific state.
         """
-        super().__init__(
-            name=name,
-            sensor_type=sensor_type,
-            parent_link=parent_link,
-            hz=hz,
-            parameters=parameters,
-            tf_manager=tf_manager,
-            scene=scene,
-            output_names=output_names,
-            output_params=output_params,
-        )
-        self.uuid = name
-        
+        super().__init__(**kwargs)
+        self.uuid = self.name
+
         # Resolve static pose offset from base_link to sensor's parent_link.
         # No silent fallback: an unresolvable parent_link is a config error, not
         # a recoverable one -- masking it here would silently mount the sensor
         # at identity and produce plausible-looking but wrong ground truth.
-        self.pose = tf_manager.get_relative_pose("base_link", parent_link)
-            
-        self.min_distance = parameters.get("min_distance", 0.1)
-        self.max_distance = parameters.get("max_distance", 100.0)
+        self.pose = self.tf_manager.get_relative_pose("base_link", self.parent_link)
+
+        self.min_distance = self.parameters.get("min_distance", 0.1)
+        self.max_distance = self.parameters.get("max_distance", 100.0)
         
         # Precomputed local ray directions: numpy array of shape (H, W, 3)
         self.ray_directions = None
@@ -68,7 +48,6 @@ class LiDAR3D(BaseSensor, abc.ABC):
         self,
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-        tf_manager: Any,
     ) -> Dict[str, Any]:
         """
         Generate sensor observations.

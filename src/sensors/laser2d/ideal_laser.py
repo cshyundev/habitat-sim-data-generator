@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import habitat_sim
 import numpy as np
@@ -14,31 +14,10 @@ from src.utils.geometry import compose_pose, rotate_vectors
 class IdealLaser2D(Laser2D):
     """An ideal binned 2D laser sensor in the local XZ plane."""
 
-    def __init__(
-        self,
-        name: str,
-        sensor_type: str,
-        parent_link: str,
-        hz: int,
-        parameters: dict,
-        tf_manager: Any,
-        scene: Any = None,
-        output_names: Optional[list] = None,
-        output_params: Optional[Dict[str, Dict[str, Any]]] = None,
-    ):
-        super().__init__(
-            name=name,
-            sensor_type=sensor_type,
-            parent_link=parent_link,
-            hz=hz,
-            parameters=parameters,
-            tf_manager=tf_manager,
-            scene=scene,
-            output_names=output_names,
-            output_params=output_params,
-        )
-        self.azimuth_range = tuple(parameters.get("azimuth_range", (-180.0, 180.0)))
-        self.azimuth_bins = int(parameters.get("azimuth_bins", 720))
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.azimuth_range = tuple(self.parameters.get("azimuth_range", (-180.0, 180.0)))
+        self.azimuth_bins = int(self.parameters.get("azimuth_bins", 720))
         self._compute_ray_directions()
 
     def _compute_ray_directions(self) -> None:
@@ -64,7 +43,6 @@ class IdealLaser2D(Laser2D):
         self,
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-        tf_manager: Any,
     ) -> Dict[str, Any]:
         if self.scene is None:
             raise RuntimeError("Laser2D requires a Scene; no sim.cast_ray fallback is created.")
@@ -84,7 +62,8 @@ class IdealLaser2D(Laser2D):
         ).astype(np.float32)
         origins = np.broadcast_to(sensor_pos_global, directions_global.shape)
 
-        self.scene.bind(sim)
+        # The Scene is bound/synced once per capture by SensorSuite.observe;
+        # the backend raises if queried unbound.
         res = self.scene.cast_rays(
             origins,
             directions_global,

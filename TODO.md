@@ -98,38 +98,47 @@ category attribute, no injection loop — `build_category_names` runs exactly on
 (This also subsumes item 5's minimal reuse: the camera's bbox3d uses
 `scene.model`, falling back to `extract_scene_model` only for the `sim` backend.)
 
-## P2 — Sensor layer boilerplate (do before adding the next sensor)
+## P2 — Sensor layer boilerplate (do before adding the next sensor) — DONE
 
-### 7. Ten-parameter constructor copy-pasted across every sensor subclass
-**Where:** `camera.py`, `base_lidar.py`, `ideal_lidar.py`, `base_laser.py`,
-`ideal_laser.py`, `ideal_imu.py` — each re-declares the identical `__init__`
-(~30 lines) only to forward everything to `super()`.
-**Fix:** `def __init__(self, **kwargs)` + `super().__init__(**kwargs)`, or pass
-a single spec object. New sensor types then only implement what differs.
+> **Status (this pass):** items 7–11 are all DONE. Full `unittest` suite green
+> (130 tests). Net effect: every sensor subclass constructor collapsed to
+> `__init__(self, **kwargs)` + `super().__init__(**kwargs)`, the base owns the
+> declared outputs, `get_observation` dropped its dead `tf_manager` arg, bind
+> happens exactly once (in the suite), and the IMU's silent fallback is gone.
 
-### 8. `BaseSensor` accepts arguments it admits to discarding
-**Where:** `src/sensors/base_sensor.py:38-40` — docstring: `output_names`/
-`output_params` are "accepted for a uniform constructor but not stored".
-**Cause:** only the camera uses them. An interface documenting that its own
-parameters are ignored is the interface saying it's wrong. Store them on the
-base (as `outputs`) or fold into the spec object from item 7.
+### 7. Ten-parameter constructor copy-pasted across every sensor subclass — DONE
+Every subclass (`camera`, `base_lidar`, `ideal_lidar`, `base_laser`,
+`ideal_laser`, `ideal_imu`) now uses `def __init__(self, **kwargs)` +
+`super().__init__(**kwargs)`, then reads its extra fields from `self.parameters`.
+`BaseSensor` keeps the single explicit signature, so an unknown kwarg still
+fails loudly at the base. New sensor types only implement what differs.
 
-### 9. `get_observation(..., tf_manager)` parameter is unused by all implementations
-**Where:** every sensor uses `self.pose` / `self.tf_manager` resolved at init;
-the call-site argument is dead. Remove it from the interface and callers.
+### 8. `BaseSensor` accepts arguments it admits to discarding — DONE
+`BaseSensor.__init__` now stores the declared outputs as `self.outputs`
+(`lowercased name -> params dict`) for **every** sensor. The camera derives
+`self.modalities = set(self.outputs)` / `self.modality_params = self.outputs`
+from it instead of re-parsing the constructor args. No parameter is accepted
+and discarded.
 
-### 10. `raycaster.bind()` called twice per capture
-**Where:** `SensorSuite.observe` (`suite.py:157`) binds/syncs once per capture,
-and each sensor defensively re-binds (`camera.py:426`, `ideal_lidar.py:108`,
-`ideal_laser.py:89`).
-**Fix:** the suite owns bind/sync; backends raise if queried unbound. Also
-remove the write-only `RayCaster._bound` flag (`raycaster.py:42,65`).
+### 9. `get_observation(..., tf_manager)` parameter is unused — DONE
+Removed from the `BaseSensor` interface, all six implementations, the single
+caller (`SensorSuite.observe`), and every test call site. Sensors already use
+`self.tf_manager` / `self.pose` resolved at init.
 
-### 11. IdealIMU silent identity-pose fallback
-**Where:** `src/sensors/imu/ideal_imu.py:55-58` — `tf_manager is None` mounts
-the IMU at identity, the exact silent fallback other sensors reject loudly.
-It exists for test convenience; make tests pass a real `TFManager` and delete
-the branch.
+### 10. `raycaster.bind()` called twice per capture — DONE
+`SensorSuite.observe` (`suite.py:162`) is now the sole binder/syncer per
+capture; the defensive `self.scene.bind(sim)` in `camera`, `ideal_lidar`, and
+`ideal_laser` are deleted. Both backends already raise if `cast_rays` is called
+unbound (`SimRaycastBackend`, `MLXRaycaster`), so the guarantee holds loudly.
+(The `RayCaster._bound` flag the review referenced no longer exists — bind moved
+to `Scene`/`RaycastBackend` in the round-2 refactor.) Direct-call tests
+(`test_lidar`, `test_laser`) now bind the Scene explicitly.
+
+### 11. IdealIMU silent identity-pose fallback — DONE
+The `tf_manager is None -> identity` branch and the `_identity_pose` helper are
+deleted; the IMU now resolves its mount via `self.tf_manager` like every other
+sensor. `tests/test_imu_sensor.py` supplies a real (identity) `TFManager` via a
+`_identity_tf_manager()` default.
 
 ## P3 — Dead code / stale artifacts (safe to delete now)
 

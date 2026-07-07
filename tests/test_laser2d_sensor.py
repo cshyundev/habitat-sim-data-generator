@@ -93,7 +93,7 @@ class TestIdealLaser2D(unittest.TestCase):
         )
 
         self.assertIsInstance(laser, BaseSensor)
-        outputs = laser.get_observation(_NoCastRaySim(), _motion_state(), laser.tf_manager)
+        outputs = laser.get_observation(_NoCastRaySim(), _motion_state())
 
         self.assertEqual(set(outputs), {"laser_scan"})
         scan = outputs["laser_scan"]

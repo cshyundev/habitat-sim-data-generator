@@ -7,6 +7,15 @@ from src.sensors.imu.ideal_imu import IdealIMU
 from src.utils.tf import TFManager
 
 
+def _identity_tf_manager() -> TFManager:
+    """base_link -> imu_link at identity (the IMU no longer has a silent
+    identity-pose fallback, so tests must supply a real TFManager)."""
+    return TFManager([
+        {"name": "base_link", "parent": None, "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
+        {"name": "imu_link", "parent": "base_link", "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},
+    ])
+
+
 def _make_imu(parameters=None, tf_manager=None) -> IdealIMU:
     return IdealIMU(
         name="imu",
@@ -14,7 +23,7 @@ def _make_imu(parameters=None, tf_manager=None) -> IdealIMU:
         parent_link="imu_link",
         hz=100,
         parameters=parameters or {},
-        tf_manager=tf_manager,
+        tf_manager=tf_manager or _identity_tf_manager(),
         output_names=["imu"],
         output_params={"imu": {}},
     )
@@ -42,7 +51,7 @@ class TestIdealIMU(unittest.TestCase):
     def test_forward_acceleration(self):
         # Forward translation accel lies on body -Z (Habitat agent frame).
         st = _state([0.0, 0.0, 0.0], [0.0, 0.0, -0.5])
-        obs = self.imu.get_observation(sim=None, motion_state=st, tf_manager=None)
+        obs = self.imu.get_observation(sim=None, motion_state=st)
         obs = obs["imu"]
         self.assertTrue(
             np.allclose(obs.linear_acceleration, [0.0, 9.80665, -0.5])
@@ -52,7 +61,7 @@ class TestIdealIMU(unittest.TestCase):
     def test_yaw_rate(self):
         # Pure yaw rotation about +Y.
         st = _state([0.0, 1.0, 0.0], [0.0, 0.0, 0.0])
-        obs = self.imu.get_observation(sim=None, motion_state=st, tf_manager=None)
+        obs = self.imu.get_observation(sim=None, motion_state=st)
         obs = obs["imu"]
         self.assertTrue(np.allclose(obs.angular_velocity, [0.0, 1.0, 0.0]))
         self.assertTrue(
@@ -61,7 +70,7 @@ class TestIdealIMU(unittest.TestCase):
 
     def test_rest_state_includes_gravity_by_default(self):
         st = _state([0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
-        obs = self.imu.get_observation(sim=None, motion_state=st, tf_manager=None)
+        obs = self.imu.get_observation(sim=None, motion_state=st)
         obs = obs["imu"]
         self.assertTrue(np.allclose(obs.angular_velocity, 0.0))
         self.assertTrue(np.allclose(obs.linear_acceleration, [0.0, 9.80665, 0.0]))
@@ -69,7 +78,7 @@ class TestIdealIMU(unittest.TestCase):
     def test_gravity_can_be_disabled(self):
         imu = _make_imu(parameters={"include_gravity": False})
         st = _state([0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
-        obs = imu.get_observation(sim=None, motion_state=st, tf_manager=None)
+        obs = imu.get_observation(sim=None, motion_state=st)
         obs = obs["imu"]
         self.assertTrue(np.allclose(obs.linear_acceleration, 0.0))
 
@@ -80,7 +89,7 @@ class TestIdealIMU(unittest.TestCase):
         ])
         imu = _make_imu(parameters={"include_gravity": False}, tf_manager=tf_manager)
         st = _state([1.0, 0.0, 0.0], [0.0, 0.0, 0.0])
-        obs = imu.get_observation(sim=None, motion_state=st, tf_manager=tf_manager)
+        obs = imu.get_observation(sim=None, motion_state=st)
         obs = obs["imu"]
         self.assertTrue(np.allclose(obs.angular_velocity, [-1.0, 0.0, 0.0]))
 
@@ -91,13 +100,13 @@ class TestIdealIMU(unittest.TestCase):
         ])
         imu = _make_imu(parameters={"include_gravity": False}, tf_manager=tf_manager)
         st = _state([0.0, 2.0, 0.0], [0.0, 0.0, 0.0])
-        obs = imu.get_observation(sim=None, motion_state=st, tf_manager=tf_manager)
+        obs = imu.get_observation(sim=None, motion_state=st)
         obs = obs["imu"]
         self.assertTrue(np.allclose(obs.linear_acceleration, [-4.0, 0.0, 0.0]))
 
     def test_output_keys_and_shapes(self):
         st = _state([0.1, 0.2, 0.3], [0.4, 0.5, 0.6])
-        obs = self.imu.get_observation(sim=None, motion_state=st, tf_manager=None)
+        obs = self.imu.get_observation(sim=None, motion_state=st)
         obs = obs["imu"]
         self.assertIsInstance(obs, Imu)
         self.assertEqual(obs.angular_velocity.shape, (3,))

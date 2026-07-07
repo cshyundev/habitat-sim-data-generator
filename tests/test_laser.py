@@ -94,8 +94,11 @@ def run_test():
         output_names=["laser_scan"],
     )
 
+    # The suite normally binds the Scene once per capture; a direct call must
+    # bind it explicitly (the sensor no longer defensively re-binds).
+    laser.scene.bind(sim)
     start_time = time.time()
-    obs = laser.get_observation(sim, _motion_state(agent_state), tf_manager)
+    obs = laser.get_observation(sim, _motion_state(agent_state))
     end_time = time.time()
     print(f"Generated Laser observation in {end_time - start_time:.4f} seconds.")
 

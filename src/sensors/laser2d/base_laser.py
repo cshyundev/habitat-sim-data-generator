@@ -11,34 +11,13 @@ from src.sensors.base_sensor import BaseSensor
 class Laser2D(BaseSensor, abc.ABC):
     """Abstract base class for custom 2D planar laser sensors."""
 
-    def __init__(
-        self,
-        name: str,
-        sensor_type: str,
-        parent_link: str,
-        hz: int,
-        parameters: dict,
-        tf_manager: Any,
-        scene: Any = None,
-        output_names: Optional[list] = None,
-        output_params: Optional[Dict[str, Dict[str, Any]]] = None,
-    ):
-        super().__init__(
-            name=name,
-            sensor_type=sensor_type,
-            parent_link=parent_link,
-            hz=hz,
-            parameters=parameters,
-            tf_manager=tf_manager,
-            scene=scene,
-            output_names=output_names,
-            output_params=output_params,
-        )
-        self.uuid = name
-        self.pose = tf_manager.get_relative_pose("base_link", parent_link)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.uuid = self.name
+        self.pose = self.tf_manager.get_relative_pose("base_link", self.parent_link)
 
-        self.min_distance = float(parameters.get("min_distance", 0.1))
-        self.max_distance = float(parameters.get("max_distance", 100.0))
+        self.min_distance = float(self.parameters.get("min_distance", 0.1))
+        self.max_distance = float(self.parameters.get("max_distance", 100.0))
         self.ray_directions: Optional[np.ndarray] = None
 
     def is_native(self) -> bool:
@@ -59,7 +38,6 @@ class Laser2D(BaseSensor, abc.ABC):
         self,
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-        tf_manager: Any,
     ) -> Dict[str, Any]:
         """Generate a mapping of output name to payload."""
         pass

@@ -1,6 +1,5 @@
 import numpy as np
 import habitat_sim
-from typing import Any, Dict, Optional
 # pyrefly: ignore [missing-import]
 from src.sensors.lidar3d.base_lidar import LiDAR3D
 from src.datatypes.motion_state import MotionState
@@ -13,36 +12,15 @@ class IdealLiDAR3D(LiDAR3D):
     """
     An ideal binned 3D LiDAR sensor simulating ray casting in a sphere configuration.
     """
-    def __init__(
-        self,
-        name: str,
-        sensor_type: str,
-        parent_link: str,
-        hz: int,
-        parameters: dict,
-        tf_manager: Any,
-        scene: Any = None,
-        output_names: Optional[list] = None,
-        output_params: Optional[Dict[str, Dict[str, Any]]] = None,
-    ):
+    def __init__(self, **kwargs):
         """
         Initialize the Ideal 3D LiDAR sensor.
         """
-        super().__init__(
-            name=name,
-            sensor_type=sensor_type,
-            parent_link=parent_link,
-            hz=hz,
-            parameters=parameters,
-            tf_manager=tf_manager,
-            scene=scene,
-            output_names=output_names,
-            output_params=output_params,
-        )
-        self.azimuth_range = tuple(parameters.get("azimuth_range", (-180.0, 180.0)))
-        self.altitude_range = tuple(parameters.get("altitude_range", (-15.0, 15.0)))
-        self.azimuth_bins = parameters.get("azimuth_bins", 360)
-        self.altitude_bins = parameters.get("altitude_bins", 16)
+        super().__init__(**kwargs)
+        self.azimuth_range = tuple(self.parameters.get("azimuth_range", (-180.0, 180.0)))
+        self.altitude_range = tuple(self.parameters.get("altitude_range", (-15.0, 15.0)))
+        self.azimuth_bins = self.parameters.get("azimuth_bins", 360)
+        self.altitude_bins = self.parameters.get("altitude_bins", 16)
         
         # Precompute local ray directions
         self._compute_ray_directions()
@@ -74,7 +52,6 @@ class IdealLiDAR3D(LiDAR3D):
         self,
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-        tf_manager: Any
     ):
         """
         Run spherical ray casting and return a local-frame PointCloud.
@@ -102,8 +79,8 @@ class IdealLiDAR3D(LiDAR3D):
         flat_directions_global = rotate_vectors(flat_directions_local, q_sensor_global_xyzw)
 
         # Batched ray cast through the shared backend. Origins are the (single)
-        # sensor world position broadcast to every ray.
-        self.scene.bind(sim)  # idempotent; ensures the backend is ready
+        # sensor world position broadcast to every ray. The Scene is bound/synced
+        # once per capture by SensorSuite.observe -- the backend raises if unbound.
         origins = np.broadcast_to(sensor_pos_global, flat_directions_global.shape)
         res = self.scene.cast_rays(
             origins,

@@ -96,8 +96,11 @@ def run_test():
         output_names=["point_cloud"],
     )
 
+    # The suite normally binds the Scene once per capture; a direct call must
+    # bind it explicitly (the sensor no longer defensively re-binds).
+    lidar.scene.bind(sim)
     start_time = time.time()
-    obs = lidar.get_observation(sim, _motion_state(agent_state), tf_manager)
+    obs = lidar.get_observation(sim, _motion_state(agent_state))
     end_time = time.time()
     print(f"Generated LiDAR observation in {end_time - start_time:.4f} seconds.")
 

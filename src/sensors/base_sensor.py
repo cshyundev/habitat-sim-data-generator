@@ -35,9 +35,9 @@ class BaseSensor(abc.ABC):
                 ray-casting) used for ray-based sensing and detections. Ray-based
                 sensors require it to be supplied by ``SensorSuite`` or tests.
                 IMU-like sensors ignore it; it is held for interface uniformity.
-            output_names/output_params: Generation hints owned by SensorSuite.
-                BaseSensor accepts them for a uniform constructor but does not
-                store export metadata.
+            output_names/output_params: The sensor's declared outputs and their
+                per-output params. Merged and stored as ``self.outputs``
+                (``lowercased name -> params dict``) for every sensor.
         """
         self.name = name
         self.sensor_type = sensor_type
@@ -46,6 +46,10 @@ class BaseSensor(abc.ABC):
         self.parameters = parameters
         self.tf_manager = tf_manager
         self.scene = scene
+        self.outputs: Dict[str, Dict[str, Any]] = {
+            str(out_name).lower(): dict((output_params or {}).get(out_name, {}) or {})
+            for out_name in (output_names or [])
+        }
     @classmethod
     def validate_outputs(cls, outputs: Dict[str, Any]) -> None:
         """Validate sensor-specific output names. Subclasses may override."""
@@ -72,7 +76,6 @@ class BaseSensor(abc.ABC):
         self,
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-        tf_manager: Any
     ) -> Dict[str, Any]:
         """
         Generates sensor observation data.
@@ -83,7 +86,6 @@ class BaseSensor(abc.ABC):
                 (pose + body-frame velocities/acceleration + timestamp_ns).
                 Pose-only sensors (camera, lidar) use ``motion_state.pose``;
                 IMU-like sensors use the velocity/acceleration fields.
-            tf_manager: The TFManager instance to query frame transforms.
 
         Returns:
             A typed sensor observation payload.

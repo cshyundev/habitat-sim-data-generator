@@ -76,7 +76,7 @@ class TestCameraSensor(unittest.TestCase):
             angular_velocity_body=np.zeros(3),
             linear_acceleration_body=np.zeros(3),
         )
-        obs = cam.get_observation(_Sim(), ms, _TF())
+        obs = cam.get_observation(_Sim(), ms)
 
         self.assertEqual(raycaster.calls, 1)
         self.assertEqual(set(obs), {"rgb", "depth", "semantic", "instance", "bbox2d", "bbox3d"})

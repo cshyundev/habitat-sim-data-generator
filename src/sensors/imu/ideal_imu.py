@@ -3,15 +3,10 @@ import habitat_sim
 from typing import Any, Optional, Dict
 
 from src.sensors.base_sensor import BaseSensor
-from src.datatypes.pose import Pose3D
 from src.datatypes.motion_state import MotionState
 from src.datatypes.imu import Imu
 from src.sensors.registry import register_sensor
 from src.utils.geometry import quaternion_to_matrix
-
-
-def _identity_pose() -> Pose3D:
-    return Pose3D(np.zeros(3, dtype=np.float32), np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32))
 
 
 @register_sensor("imu")
@@ -25,40 +20,18 @@ class IdealIMU(BaseSensor):
     patch. Values remain in Habitat axes until export, where the final
     Habitat-to-ROS basis conversion happens.
     """
-    def __init__(
-        self,
-        name: str,
-        sensor_type: str,
-        parent_link: str,
-        hz: int,
-        parameters: dict,
-        tf_manager: Any,
-        scene: Any = None,
-        output_names: Optional[list] = None,
-        output_params: Optional[Dict[str, Dict[str, Any]]] = None,
-    ):
-        # IMU does not ray-cast; ``scene`` is accepted only for a uniform
-        # sensor constructor signature.
-        super().__init__(
-            name=name,
-            sensor_type=sensor_type,
-            parent_link=parent_link,
-            hz=hz,
-            parameters=parameters,
-            tf_manager=tf_manager,
-            scene=scene,
-            output_names=output_names,
-            output_params=output_params,
-        )
-        if tf_manager is None:
-            self.pose = _identity_pose()
-        else:
-            self.pose = tf_manager.get_relative_pose("base_link", parent_link)
+    def __init__(self, **kwargs):
+        # IMU does not ray-cast; ``scene`` (forwarded via kwargs) is accepted
+        # only for a uniform sensor constructor signature.
+        super().__init__(**kwargs)
+        # No silent identity-pose fallback: an unresolvable mount is a config
+        # error, exactly as the ray-based sensors treat it.
+        self.pose = self.tf_manager.get_relative_pose("base_link", self.parent_link)
         self._base_R_imu = quaternion_to_matrix(self.pose.orientation)
         self.include_gravity = bool(
-            parameters.get("include_gravity", parameters.get("apply_gravity", True))
+            self.parameters.get("include_gravity", self.parameters.get("apply_gravity", True))
         )
-        self.gravity_mps2 = float(parameters.get("gravity_mps2", 9.80665))
+        self.gravity_mps2 = float(self.parameters.get("gravity_mps2", 9.80665))
 
     @classmethod
     def validate_outputs(cls, outputs: Dict[str, Any]) -> None:
@@ -75,7 +48,6 @@ class IdealIMU(BaseSensor):
         self,
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-        tf_manager: Any
     ):
         """
         Returns gyroscope and accelerometer readings in the IMU sensor frame.
