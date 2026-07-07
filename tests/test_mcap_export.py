@@ -14,6 +14,7 @@ from src.utils.export import McapExporter
 from src.runtime_config import McapExportConfig
 from src.pipeline.mcap_sink import McapSink, collect_calibrations, write_sidecar_yaml, _sidecar_path
 from src.pipeline.sink import StreamContext
+from src.sensors.export_helper import export_sensor_data
 from src.datatypes.pose import Pose3D
 from src.datatypes.point_cloud import PointCloud
 from src.datatypes.laser_scan import LaserScan
@@ -187,6 +188,20 @@ class _FakeCamera:
 
 class _FakeImu:
     sensor_type = "imu"
+    name = "imu"
+    parent_link = "imu_link"
+
+
+class _FakeLidar:
+    sensor_type = "lidar3d"
+    name = "lidar"
+    parent_link = "lidar_link"
+
+
+class _FakeLaser:
+    sensor_type = "laser2d"
+    name = "laser"
+    parent_link = "laser_link"
 
 
 class _FakeTFManager:
@@ -219,6 +234,32 @@ class TestMcapSidecars(unittest.TestCase):
             with open(sidecar) as f:
                 loaded = yaml.safe_load(f)
         self.assertEqual(loaded["semantic_categories"], {1: "chair"})
+
+
+class TestExportSensorDataValidation(unittest.TestCase):
+    def test_outputs_must_be_mapping(self):
+        with self.assertRaisesRegex(TypeError, "lidar: expected sensor outputs mapping"):
+            export_sensor_data(object(), _FakeLidar(), object(), 0)
+
+    def test_point_cloud_payload_type_mismatch_raises(self):
+        with self.assertRaisesRegex(TypeError, "lidar.point_cloud: expected PointCloud"):
+            export_sensor_data(object(), _FakeLidar(), {"point_cloud": object()}, 0)
+
+    def test_laser_scan_payload_type_mismatch_raises(self):
+        with self.assertRaisesRegex(TypeError, "laser.laser_scan: expected LaserScan"):
+            export_sensor_data(object(), _FakeLaser(), {"laser_scan": object()}, 0)
+
+    def test_imu_payload_type_mismatch_raises(self):
+        with self.assertRaisesRegex(TypeError, "imu.imu: expected Imu"):
+            export_sensor_data(object(), _FakeImu(), {"imu": object()}, 0)
+
+    def test_empty_point_cloud_is_still_skipped(self):
+        export_sensor_data(
+            object(),
+            _FakeLidar(),
+            {"point_cloud": PointCloud(points=np.empty((0, 3), dtype=np.float32))},
+            0,
+        )
 
 
 class TestMcapSinkMapExport(unittest.TestCase):

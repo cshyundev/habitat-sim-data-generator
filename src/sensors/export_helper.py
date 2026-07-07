@@ -17,6 +17,20 @@ def _frame_id(sensor: BaseSensor, output_name: str) -> str:
     return "map" if output_name == "bbox3d" else sensor.parent_link
 
 
+def _expect_payload(
+    payload: object,
+    expected_type: type,
+    sensor: BaseSensor,
+    output_name: str,
+) -> object:
+    if not isinstance(payload, expected_type):
+        raise TypeError(
+            f"{sensor.name}.{output_name}: expected {expected_type.__name__}, "
+            f"got {type(payload).__name__}."
+        )
+    return payload
+
+
 def _write_point_cloud(
     exporter: McapExporter,
     sensor: BaseSensor,
@@ -24,10 +38,8 @@ def _write_point_cloud(
     payload: object,
     timestamp_ns: int,
 ) -> None:
-    cloud = payload
-    if not isinstance(cloud, PointCloud):
-        return
-    if cloud is None or cloud.size == 0:
+    cloud = _expect_payload(payload, PointCloud, sensor, output_name)
+    if cloud.size == 0:
         return
 
     ros_points = habitat_to_ros_pointcloud(cloud.points).astype(np.float32)
@@ -48,9 +60,7 @@ def _write_laser_scan(
     payload: object,
     timestamp_ns: int,
 ) -> None:
-    scan = payload
-    if not isinstance(scan, LaserScan):
-        return
+    scan = _expect_payload(payload, LaserScan, sensor, output_name)
     exporter.write_laser_scan(
         timestamp_ns=timestamp_ns,
         frame_id=_frame_id(sensor, output_name),
@@ -66,9 +76,7 @@ def _write_imu(
     payload: object,
     timestamp_ns: int,
 ) -> None:
-    observation = payload
-    if not isinstance(observation, Imu):
-        return
+    observation = _expect_payload(payload, Imu, sensor, output_name)
     angular_velocity_ros = habitat_to_ros_position(
         np.asarray(observation.angular_velocity, dtype=np.float64)
     )
@@ -210,7 +218,10 @@ def export_sensor_data(
         timestamp_ns: Simulation timestamp in nanoseconds.
     """
     if not isinstance(outputs, dict):
-        return
+        raise TypeError(
+            f"{sensor.name}: expected sensor outputs mapping, "
+            f"got {type(outputs).__name__}."
+        )
 
     for output_name, payload in outputs.items():
         output_key = str(output_name).lower()

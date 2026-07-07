@@ -226,6 +226,24 @@ class TestVisualizationSink(unittest.TestCase):
         sink.on_event(_event([lidar], obs))
         self.assertEqual(backend.kinds().count("points"), 0)
 
+    def test_lidar_payload_type_mismatch_raises(self):
+        backend = FakeBackend()
+        sink = VisualizationSink(backend)
+        lidar = _fake_lidar()
+        obs = {"lidar": {"point_cloud": object()}}
+
+        with self.assertRaisesRegex(TypeError, "lidar.point_cloud: expected PointCloud"):
+            sink.on_event(_event([lidar], obs))
+
+    def test_imu_payload_type_mismatch_raises(self):
+        backend = FakeBackend()
+        sink = VisualizationSink(backend)
+        imu = _FakeSensor("imu", "imu", "imu_link")
+        obs = {"imu": {"imu": object()}}
+
+        with self.assertRaisesRegex(TypeError, "imu.imu: expected Imu"):
+            sink.on_event(_event([imu], obs))
+
 
 if __name__ == "__main__":
     unittest.main()

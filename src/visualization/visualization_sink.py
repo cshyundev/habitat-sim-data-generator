@@ -229,8 +229,11 @@ class VisualizationSink(StreamSink):
     # ------------------------------------------------------------------
     def _log_lidar3d(self, sensor, cloud) -> None:
         if not isinstance(cloud, PointCloud):
-            return
-        if cloud is None or cloud.size == 0:
+            raise TypeError(
+                f"{sensor.name}.point_cloud: expected PointCloud, "
+                f"got {type(cloud).__name__}."
+            )
+        if cloud.size == 0:
             return
         ros_pc = habitat_to_ros_pointcloud(cloud.points).astype(np.float32)
         self.backend.log_points(
@@ -242,7 +245,10 @@ class VisualizationSink(StreamSink):
 
     def _log_imu(self, sensor, observation) -> None:
         if not isinstance(observation, Imu):
-            return
+            raise TypeError(
+                f"{sensor.name}.imu: expected Imu, "
+                f"got {type(observation).__name__}."
+            )
         av = habitat_to_ros_position(np.asarray(observation.angular_velocity, dtype=np.float64))
         la = habitat_to_ros_position(np.asarray(observation.linear_acceleration, dtype=np.float64))
         base = f"{self.imu_path}/{sensor.name}"

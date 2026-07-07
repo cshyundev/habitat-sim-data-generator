@@ -189,7 +189,7 @@ and delete the merge logic; the function should roughly halve.
 Configs live in-repo; keeping silent fallbacks contradicts the stated
 fail-loud policy. Migrate the fixtures, then fail on the legacy keys.
 
-### 16. Silent data drop in export/visualization writers
+### 16. Silent data drop in export/visualization writers — DONE
 **Where:** `src/sensors/export_helper.py:27-30` (and siblings),
 `src/visualization/visualization_sink.py:203-206`.
 **Cause:** `if not isinstance(payload, PointCloud): return` silently skips a
