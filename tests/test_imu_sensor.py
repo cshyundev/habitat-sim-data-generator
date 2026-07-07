@@ -82,6 +82,10 @@ class TestIdealIMU(unittest.TestCase):
         obs = obs["imu"]
         self.assertTrue(np.allclose(obs.linear_acceleration, 0.0))
 
+    def test_apply_gravity_alias_raises(self):
+        with self.assertRaises(ValueError):
+            _make_imu(parameters={"apply_gravity": False})
+
     def test_sensor_frame_rotation_is_applied(self):
         tf_manager = TFManager([
             {"name": "base_link", "parent": None, "position": [0.0, 0.0, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0]},

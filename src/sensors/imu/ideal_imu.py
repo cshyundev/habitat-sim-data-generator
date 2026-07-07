@@ -29,9 +29,11 @@ class IdealIMU(BaseSensor):
         # error, exactly as the ray-based sensors treat it.
         self.pose = self.tf_manager.get_relative_pose("base_link", self.parent_link)
         self._base_R_imu = quaternion_to_matrix(self.pose.orientation)
-        self.include_gravity = bool(
-            self.parameters.get("include_gravity", self.parameters.get("apply_gravity", True))
-        )
+        if "apply_gravity" in self.parameters:
+            raise ValueError(
+                "IMU parameter 'apply_gravity' is not supported; use 'include_gravity'."
+            )
+        self.include_gravity = bool(self.parameters.get("include_gravity", True))
         self.gravity_mps2 = float(self.parameters.get("gravity_mps2", 9.80665))
 
     @classmethod

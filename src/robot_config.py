@@ -127,21 +127,22 @@ def _load_sensor_specs(
         raise ConfigError(f"sensor spec '{path}': 'sensors' must be a non-empty list.")
 
     specs: List[SensorSpec] = []
-    raw_sensor_frames = robot.get("sensor_frames", {}) or {}
-    if not isinstance(raw_sensor_frames, dict):
-        raise ConfigError("robot.sensor_frames: must be a mapping when provided.")
+    if "sensor_frames" in robot:
+        raise ConfigError(
+            "robot.sensor_frames: legacy frame mapping is not supported; use sensor.link."
+        )
 
     for i, s in enumerate(raw):
         ctx = f"sensor[{i}]"
-        if "link" in s:
-            link = _require_nonempty_str(s, "link", ctx)
-            name = link
-            parent_link = link
-        else:
-            # Migration path for older fixtures/configs. New configs should use
-            # link and omit name/sensor_frames.
-            name = _require_nonempty_str(s, "name", ctx)
-            parent_link = _require_nonempty_str(raw_sensor_frames, name, "robot.sensor_frames")
+        if not isinstance(s, dict):
+            raise ConfigError(f"{ctx}: must be a mapping.")
+        if "name" in s:
+            raise ConfigError(
+                f"{ctx}.name: legacy sensor names are not supported; use sensor.link."
+            )
+        link = _require_nonempty_str(s, "link", ctx)
+        name = link
+        parent_link = link
         ctx = f"sensor '{name}'"
         s_type = _require_nonempty_str(s, "type", ctx)
         hz = _require(s, "hz", ctx)
@@ -172,24 +173,13 @@ def _load_sensor_specs(
         if "modality" in parameters:
             raise ConfigError(f"{ctx}: legacy parameters.modality is not supported.")
 
-        if "outputs" in s and "modalities" in s:
-            raise ConfigError(f"{ctx}: use either outputs or modalities, not both.")
-        if "outputs" in s:
-            raw_outputs = _require(s, "outputs", ctx)
-            if not isinstance(raw_outputs, dict) or not raw_outputs:
-                raise ConfigError(f"{ctx}.outputs: must be a non-empty mapping.")
-        elif "modalities" in s:
-            raw_modalities = _require(s, "modalities", ctx)
-            if isinstance(raw_modalities, list):
-                raw_outputs = {str(modality).lower(): {} for modality in raw_modalities}
-            elif isinstance(raw_modalities, dict):
-                raw_outputs = raw_modalities
-            else:
-                raise ConfigError(f"{ctx}.modalities: must be a list or mapping.")
-            if not raw_outputs:
-                raise ConfigError(f"{ctx}.modalities: must not be empty.")
-        else:
-            raise ConfigError(f"{ctx}: missing required key 'outputs' or 'modalities'.")
+        if "modalities" in s:
+            raise ConfigError(
+                f"{ctx}.modalities: legacy output lists are not supported; use outputs."
+            )
+        raw_outputs = _require(s, "outputs", ctx)
+        if not isinstance(raw_outputs, dict) or not raw_outputs:
+            raise ConfigError(f"{ctx}.outputs: must be a non-empty mapping.")
 
         outputs: Dict[str, SensorOutputSpec] = {}
         for output_name, output_cfg in raw_outputs.items():

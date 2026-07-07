@@ -204,21 +204,6 @@ class TestDifferentialDriveParams(unittest.TestCase):
         self.assertEqual(params.angular_velocity, 1.5)
         self.assertEqual(params.angular_acceleration, 3.0)
 
-    def test_from_config_legacy_local_planner_section(self):
-        config = {
-            "local_planner": {
-                "linear_velocity": 0.4,
-                "linear_acceleration": 0.8,
-                "angular_velocity": 1.5,
-                "angular_acceleration": 3.0,
-            },
-        }
-        params = DifferentialDriveParams.from_config(config)
-        self.assertEqual(params.linear_velocity, 0.4)
-        self.assertEqual(params.linear_acceleration, 0.8)
-        self.assertEqual(params.angular_velocity, 1.5)
-        self.assertEqual(params.angular_acceleration, 3.0)
-
         d = params.to_dict()
         self.assertIn("linear_velocity", d)
         # Local profile params replace the old constant-step params.

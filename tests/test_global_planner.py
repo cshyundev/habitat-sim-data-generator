@@ -148,19 +148,6 @@ class TestGlobalPlanner(unittest.TestCase):
         self.assertNotIn("angular_step", d)
         self.assertNotIn("step_dt_ns", d)
 
-    def test_legacy_params_from_config(self):
-        config = {
-            "planner": {
-                "resolution": 0.11,
-                "wall_distance": 0.22,
-                "zigzag_spacing": 0.66,
-            },
-        }
-        params = ZigzagCoverageParams.from_config(config)
-        self.assertEqual(params.resolution, 0.11)
-        self.assertEqual(params.wall_distance, 0.22)
-        self.assertEqual(params.zigzag_spacing, 0.66)
-
 
 if __name__ == "__main__":
     unittest.main()

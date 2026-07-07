@@ -44,28 +44,19 @@ class DifferentialDriveLocalPlanner(BaseLocalPlanner):
     IMU simulation.
 
     Args:
-        params: Typed planner parameters. If omitted, legacy keyword defaults are
-            accepted for backward compatibility.
-        **kwargs: Legacy velocity/acceleration overrides.
+        params: Typed planner parameters. If omitted, planner defaults are used.
     """
     def __init__(
         self,
         params: Optional[DifferentialDriveParams] = None,
-        **kwargs,
     ) -> None:
         """Initialize the local planner.
 
         Args:
             params: Optional typed differential-drive parameters.
-            **kwargs: Legacy parameter overrides used when ``params`` is omitted.
         """
         if params is None:
-            params = DifferentialDriveParams(
-                linear_velocity=kwargs.get("linear_velocity", 0.3),
-                linear_acceleration=kwargs.get("linear_acceleration", 0.5),
-                angular_velocity=kwargs.get("angular_velocity", 1.0),
-                angular_acceleration=kwargs.get("angular_acceleration", 2.0),
-            )
+            params = DifferentialDriveParams.from_config({})
         self.params = params
         self._primitives: List[_Primitive] = []
         self._duration_ns: int = 0

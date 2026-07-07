@@ -25,7 +25,13 @@ sensors:
       intrinsic: [500.0, 500.0, 320.0, 240.0]
       depth_type: planar
       min_box_px: 8
-    modalities: [rgb, depth, semantic, instance, bbox2d, bbox3d]
+    outputs:
+      rgb: {}
+      depth: {}
+      semantic: {}
+      instance: {}
+      bbox2d: {}
+      bbox3d: {}
   - link: imu_link
     type: imu
     hz: 100

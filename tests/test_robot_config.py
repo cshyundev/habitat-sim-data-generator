@@ -17,16 +17,15 @@ MOUNTS = [
 
 VALID_SENSORS = [
     {
-        "name": "lidar_3d", "type": "lidar3d", "hz": 10,
+        "link": "lidar_link", "type": "lidar3d", "hz": 10,
         "outputs": {"point_cloud": {}},
         "parameters": {"lidar_type": "ideal"},
     },
     {
-        "name": "imu", "type": "imu", "hz": 100,
+        "link": "imu_link", "type": "imu", "hz": 100,
         "outputs": {"imu": {}},
     },
 ]
-SENSOR_FRAMES = {"lidar_3d": "lidar_link", "imu": "imu_link"}
 
 
 class _Base(unittest.TestCase):
@@ -53,21 +52,19 @@ class _Base(unittest.TestCase):
         self,
         sensors=None,
         urdf="default",
-        sensor_frames="default",
+        robot_extra=None,
     ):
         sensors = VALID_SENSORS if sensors is None else sensors
         if urdf == "default":
             urdf = self._urdf_file()
+        robot = {
+            "urdf": urdf,
+            "sensors": self._sensors_file(copy.deepcopy(sensors)),
+        }
+        if robot_extra:
+            robot.update(robot_extra)
         return {
-            "robot": {
-                "urdf": urdf,
-                "sensors": self._sensors_file(copy.deepcopy(sensors)),
-                "sensor_frames": (
-                    copy.deepcopy(SENSOR_FRAMES)
-                    if sensor_frames == "default"
-                    else sensor_frames
-                ),
-            }
+            "robot": robot,
         }
 
 
@@ -81,7 +78,7 @@ class TestValid(_Base):
             },
             {
                 "link": "camera_link", "type": "camera", "hz": 10,
-                "modalities": ["rgb", "depth", "bbox2d"],
+                "outputs": {"rgb": {}, "depth": {}, "bbox2d": {}},
                 "parameters": {
                     "model": "pinhole",
                     "width": 640,
@@ -92,10 +89,7 @@ class TestValid(_Base):
                 },
             },
         ]
-        bundle = load_robot(self._config(
-            sensors=sensors,
-            sensor_frames={},
-        ))
+        bundle = load_robot(self._config(sensors=sensors))
         self.assertEqual([s.name for s in bundle.sensors], ["lidar_link", "camera_link"])
         camera = bundle.sensors[1]
         self.assertEqual(camera.parent_link, "camera_link")
@@ -107,7 +101,7 @@ class TestValid(_Base):
         bundle = load_robot(self._config())
         names = {f["name"] for f in bundle.frames}
         self.assertEqual(names, {"base_link", "lidar_link", "camera_link", "imu_link"})
-        self.assertEqual([s.name for s in bundle.sensors], ["lidar_3d", "imu"])
+        self.assertEqual([s.name for s in bundle.sensors], ["lidar_link", "imu_link"])
 
     def test_zup_mount_becomes_yup_frame(self):
         bundle = load_robot(self._config())
@@ -160,15 +154,11 @@ class TestBodyDims(_Base):
             f.write(urdf)
 
         sensors = [{
-            "name": "lidar_3d", "type": "lidar3d", "hz": 10,
+            "link": "lidar_link", "type": "lidar3d", "hz": 10,
             "outputs": {"point_cloud": {}},
             "parameters": {},
         }]
-        bundle = load_robot(self._config(
-            sensors=sensors,
-            urdf=urdf_path,
-            sensor_frames={"lidar_3d": "lidar_link"},
-        ))
+        bundle = load_robot(self._config(sensors=sensors, urdf=urdf_path))
         self.assertAlmostEqual(bundle.body_height, 1.2, places=4)
         self.assertAlmostEqual(bundle.body_radius, float(np.hypot(0.2, 0.3)), places=4)
 
@@ -221,11 +211,24 @@ class TestValidationRaises(_Base):
         with self.assertRaises(ConfigError):
             load_robot(self._config(sensors=bad))
 
-    def test_sensor_frame_not_in_urdf(self):
-        frames = copy.deepcopy(SENSOR_FRAMES)
-        frames["lidar_3d"] = "ghost_link"
+    def test_legacy_sensor_frames_raises(self):
         with self.assertRaises(ConfigError):
-            load_robot(self._config(sensor_frames=frames))
+            load_robot(
+                self._config(robot_extra={"sensor_frames": {"lidar_3d": "lidar_link"}})
+            )
+
+    def test_legacy_sensor_name_raises(self):
+        bad = copy.deepcopy(VALID_SENSORS)
+        bad[0]["name"] = "lidar_3d"
+        with self.assertRaises(ConfigError):
+            load_robot(self._config(sensors=bad))
+
+    def test_legacy_modalities_raises(self):
+        bad = copy.deepcopy(VALID_SENSORS)
+        bad[0]["modalities"] = ["point_cloud"]
+        del bad[0]["outputs"]
+        with self.assertRaises(ConfigError):
+            load_robot(self._config(sensors=bad))
 
     def test_urdf_missing_sensor_frame_raises(self):
         # imu sensor references imu_link, but the URDF omits it -> frame unresolved.

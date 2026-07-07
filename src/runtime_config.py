@@ -228,29 +228,31 @@ class RaycastingConfig:
         Raises:
             ConfigError: If keys or enum values are invalid.
         """
-        section = config.get("raycasting")
-        if section is None:
-            robot = config.get("robot", {}) or {}
-            if not isinstance(robot, dict):
-                raise ConfigError("robot: must be a mapping.")
-            section = robot.get("raycasting", {}) or {}
-        else:
-            section = section or {}
+        if "raycasting" in config:
+            raise ConfigError(
+                "raycasting: top-level configuration is not supported; use robot.raycasting."
+            )
+        robot = config.get("robot", {}) or {}
+        if not isinstance(robot, dict):
+            raise ConfigError("robot: must be a mapping.")
+        section = robot.get("raycasting", {}) or {}
         if not isinstance(section, dict):
-            raise ConfigError("raycasting: must be a mapping.")
-        _unknown_keys(section, {"backend", "geometry", "dynamic", "leaf_size"}, "raycasting")
+            raise ConfigError("robot.raycasting: must be a mapping.")
+        _unknown_keys(
+            section, {"backend", "geometry", "dynamic", "leaf_size"}, "robot.raycasting"
+        )
 
         backend = str(section.get("backend", "gpu")).lower()
         if backend not in ("sim", "gpu", "mlx"):
-            raise ConfigError("raycasting.backend: expected 'sim', 'gpu', or 'mlx'.")
+            raise ConfigError("robot.raycasting.backend: expected 'sim', 'gpu', or 'mlx'.")
 
         geometry = str(section.get("geometry", "collision")).lower()
         if geometry not in ("collision", "visual"):
-            raise ConfigError("raycasting.geometry: expected 'collision' or 'visual'.")
+            raise ConfigError("robot.raycasting.geometry: expected 'collision' or 'visual'.")
 
         leaf_size = int(section.get("leaf_size", 8))
         if leaf_size <= 0:
-            raise ConfigError("raycasting.leaf_size: must be positive.")
+            raise ConfigError("robot.raycasting.leaf_size: must be positive.")
 
         return cls(
             backend=backend,
@@ -302,9 +304,7 @@ class RuntimeConfig:
             "scene_id",
             "output_dir",
             "output_filename",
-            "raycasting",
             "planner",
-            "local_planner",
             "robot",
             "mcap_export",
         }
@@ -313,6 +313,9 @@ class RuntimeConfig:
         planner_section = config.get("planner", {}) or {}
         if not isinstance(planner_section, dict):
             raise ConfigError("planner: must be a mapping.")
+        _unknown_keys(
+            planner_section, {"global", "local", "max_duration_sec"}, "planner"
+        )
         max_duration = planner_section.get("max_duration_sec")
         if max_duration is not None:
             max_duration = float(max_duration)

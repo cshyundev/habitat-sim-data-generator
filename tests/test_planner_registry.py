@@ -75,11 +75,6 @@ class TestPlannerRegistry(unittest.TestCase):
         self.assertIsInstance(create_global_planner(config), ZigzagCoveragePlanner)
         self.assertIsInstance(create_local_planner(config), DifferentialDriveLocalPlanner)
 
-    def test_legacy_global_type_does_not_drive_local_type(self):
-        config = {"planner": {"type": "zigzag"}}
-        self.assertIsInstance(create_global_planner(config), ZigzagCoveragePlanner)
-        self.assertIsInstance(create_local_planner(config), DifferentialDriveLocalPlanner)
-
     def test_unknown_types_raise_config_error(self):
         with self.assertRaises(ConfigError):
             create_global_planner({"planner": {"global": {"type": "missing", "params": {}}}})

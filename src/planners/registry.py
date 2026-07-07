@@ -41,16 +41,13 @@ def _identity_params(config: Mapping[str, object]) -> Mapping[str, object]:
 def _planner_section(
     config: Mapping[str, object],
     key: str,
-    legacy_key: str | None = None,
 ) -> Mapping[str, object]:
-    """Read a planner config subsection, including legacy top-level keys."""
+    """Read a planner config subsection."""
     planner = config.get("planner", {}) or {}
     if isinstance(planner, dict) and key in planner:
         section = planner.get(key) or {}
-    elif legacy_key is not None:
-        section = config.get(legacy_key, {}) or {}
     else:
-        section = planner
+        section = {}
     if not isinstance(section, dict):
         raise ConfigError(f"planner.{key}: must be a mapping.")
     return section
@@ -78,13 +75,7 @@ def local_planner_type(config: Mapping[str, object]) -> str:
     Returns:
         Lowercase local planner type name.
     """
-    planner = config.get("planner", {}) or {}
-    if isinstance(planner, dict) and "local" in planner:
-        section = planner.get("local") or {}
-    else:
-        section = config.get("local_planner", {}) or {}
-    if not isinstance(section, dict):
-        raise ConfigError("planner.local: must be a mapping.")
+    section = _planner_section(config, "local")
     return str(section.get("type", "differential_drive")).lower()
 
 

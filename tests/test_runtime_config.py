@@ -92,13 +92,17 @@ class TestRuntimeConfigValidation(unittest.TestCase):
         runtime = validate_runtime_config(cfg)
         self.assertEqual(runtime.raycasting.backend, "gpu")
 
-    def test_legacy_planner_config_validates(self):
+    def test_legacy_flat_planner_config_raises(self):
         cfg = _valid_config()
         cfg["planner"] = {"type": "zigzag", "resolution": 0.05}
+        with self.assertRaises(ConfigError):
+            validate_runtime_config(cfg)
+
+    def test_legacy_top_level_local_planner_raises(self):
+        cfg = _valid_config()
         cfg["local_planner"] = {"linear_velocity": 0.3}
-        runtime = validate_runtime_config(cfg)
-        self.assertEqual(runtime.planner.global_type, "zigzag")
-        self.assertEqual(runtime.planner.local_type, "differential_drive")
+        with self.assertRaises(ConfigError):
+            validate_runtime_config(cfg)
 
     def test_unknown_top_level_key_raises(self):
         cfg = _valid_config()
@@ -126,11 +130,17 @@ class TestRuntimeConfigValidation(unittest.TestCase):
 
     def test_raycasting_unknown_key_raises(self):
         with self.assertRaises(ConfigError):
-            RaycastingConfig.from_config({"raycasting": {"backend": "sim", "leafsize": 8}})
+            RaycastingConfig.from_config({
+                "robot": {"raycasting": {"backend": "sim", "leafsize": 8}}
+            })
 
     def test_raycasting_invalid_backend_raises(self):
         with self.assertRaises(ConfigError):
-            RaycastingConfig.from_config({"raycasting": {"backend": "cuda"}})
+            RaycastingConfig.from_config({"robot": {"raycasting": {"backend": "cuda"}}})
+
+    def test_top_level_raycasting_raises(self):
+        with self.assertRaises(ConfigError):
+            RaycastingConfig.from_config({"raycasting": {"backend": "sim"}})
 
     def test_mcap_channel_unknown_key_raises(self):
         with self.assertRaises(ConfigError):

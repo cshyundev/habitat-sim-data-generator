@@ -178,7 +178,7 @@ OR under a separate `sensor_channels` section that then merges in. Two ways to
 say the same thing forces the parser to police reserved names. Pick one shape
 and delete the merge logic; the function should roughly halve.
 
-### 15. Legacy/dual config read paths (~6 sites) — commit to one schema
+### 15. Legacy/dual config read paths (~6 sites) — commit to one schema — DONE
 - `modalities` vs `outputs` in sensor specs (`robot_config.py:144-161`).
 - `name` + `robot.sensor_frames` migration path (`robot_config.py:111-115`).
 - Top-level `local_planner` fallback and legacy `planner` params fallback
