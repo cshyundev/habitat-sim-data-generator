@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import habitat_sim
 
-from src.robot import DEFAULT_HEIGHT, DEFAULT_URDF, add_robot, cylinder_urdf
+from tests.robot_fixtures import DEFAULT_HEIGHT, DEFAULT_URDF, add_robot, cylinder_urdf
 
 
 def _make_empty_sim():

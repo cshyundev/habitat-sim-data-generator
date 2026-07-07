@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <!-- Default cylinder robot with sensor mount frames. Convention: ROS REP-103 (Z-up, X-forward). -->
-<!-- Body geometry matches src.robot.cylinder_urdf(height=0.5, radius=0.25). -->
+<!-- Body geometry matches tests.robot_fixtures.cylinder_urdf(height=0.5, radius=0.25). -->
 <robot name="cylinder_robot">
   <!-- Cylindrical body: base sits on the floor plane (z in [0, 0.5]). -->
   <link name="base_link">

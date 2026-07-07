@@ -207,7 +207,7 @@ unreachable; delete.
 ### 18. Minor
 - `robot.py`'s `cylinder_urdf` / `add_robot` / `DEFAULT_*` are used only by
   tests (the pipeline never instantiates the robot body in the sim). Move to a
-  test helper or document that they are fixtures.
+  test helper or document that they are fixtures. — DONE
 - `zigzag_coverage.plan` and `_plan_from_map` both repeat the same
   `kwargs.get("wall_distance", p.wall_distance)` override layer. — DONE
 - `camera._build_model` re-validates `intrinsic` already validated in

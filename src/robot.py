@@ -1,25 +1,23 @@
-"""Cylinder robot URDF helpers for habitat-sim.
+"""Robot URDF parsing helpers for habitat-sim.
 
-Two responsibilities, both keyed on URDF data:
+Responsibilities, keyed on URDF data:
 
-* ``cylinder_urdf`` / ``add_robot`` — describe and instantiate a cylinder body
-  (a habitat-sim articulated object). habitat-sim owns all geometry/collision.
 * ``urdf_frames`` — extract the link frame tree (mount poses) as the dict list the
   ``TFManager`` consumes. Used to source sensor mount frames from the URDF instead
   of a hand-written ``robot.links`` list. We read ``<joint><origin>`` directly
   (lightweight) because the sensor suite is built before the simulator exists, so
   habitat AO link nodes are not available yet.
+* ``urdf_body_dims`` — derive the agent capsule dimensions from the configured
+  base-link geometry.
 
 URDFs are authored in the standard ROS/URDF convention (Z-up, X-forward).
 ``urdf_frames`` converts mount poses to Habitat's Y-up frame for the rest of the
-pipeline; the habitat AO itself keeps the URDF Z-up frame (world placement is via
-the object's root transform, a later concern).
+pipeline.
 """
 
 from __future__ import annotations
 
 import os
-import tempfile
 import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional, Tuple
 
@@ -32,90 +30,15 @@ from src.utils.coords import (
 )
 from src.utils.geometry import rpy_to_quaternion
 
-DEFAULT_HEIGHT = 0.5
-DEFAULT_RADIUS = 0.25
-DEFAULT_URDF = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "assets", "robots", "cylinder_robot.urdf")
-)
-
 
 # ---------------------------------------------------------------------------
 # Small formatting / parsing helpers
 # ---------------------------------------------------------------------------
-def _vec(v: List[float]) -> str:
-    """Format a 3-vector as clean URDF text ('0 0 0.5', no trailing '.0')."""
-    return " ".join(f"{float(x):g}" for x in v)
-
-
 def _floats(s: Optional[str]) -> List[float]:
     """Parse a whitespace/comma separated 3-vector."""
     if not s:
         return [0.0, 0.0, 0.0]
     return [float(x) for x in s.replace(",", " ").split()]
-
-
-# ---------------------------------------------------------------------------
-# URDF generation (default cylinder body + arbitrary mount links)
-# ---------------------------------------------------------------------------
-def _mount_xml(m: Dict[str, object]) -> str:
-    """Render one fixed mount link/joint block as URDF XML."""
-    xyz = _vec(m["xyz"])
-    rpy = _vec(m.get("rpy", [0, 0, 0]))
-    name = m["name"]
-    return (
-        f'\n  <link name="{name}"/>\n'
-        f'  <joint name="{name}_joint" type="fixed">\n'
-        f'    <parent link="{m["parent"]}"/>\n'
-        f'    <child link="{name}"/>\n'
-        f'    <origin xyz="{xyz}" rpy="{rpy}"/>\n'
-        f"  </joint>\n"
-    )
-
-
-def cylinder_urdf(
-    height: float = DEFAULT_HEIGHT,
-    radius: float = DEFAULT_RADIUS,
-    lidar_height: Optional[float] = None,
-    name: str = "cylinder_robot",
-    mounts: Optional[List[Dict[str, object]]] = None,
-) -> str:
-    """Return URDF text for the cylinder robot.
-
-    Args:
-        height: Cylinder height in metres.
-        radius: Cylinder radius in metres.
-        lidar_height: Legacy lidar mount height when ``mounts`` is omitted.
-        name: URDF robot name.
-        mounts: Optional fixed mount frame dictionaries.
-
-    Returns:
-        URDF XML text in ROS Z-up convention.
-    """
-    if mounts is None:
-        lh = height if lidar_height is None else lidar_height
-        mounts = [{"name": "lidar_link", "parent": "base_link", "xyz": [0, 0, lh], "rpy": [0, 0, 0]}]
-
-    half = f"{height / 2.0:g}"
-    body = (
-        f'<?xml version="1.0"?>\n'
-        f"<!-- Convention: ROS REP-103 (Z-up, X-forward). -->\n"
-        f'<robot name="{name}">\n'
-        f'  <link name="base_link">\n'
-        f"    <visual>\n"
-        f'      <origin xyz="0 0 {half}" rpy="0 0 0"/>\n'
-        f"      <geometry>\n"
-        f'        <cylinder radius="{radius:g}" length="{height:g}"/>\n'
-        f"      </geometry>\n"
-        f"    </visual>\n"
-        f"    <collision>\n"
-        f'      <origin xyz="0 0 {half}" rpy="0 0 0"/>\n'
-        f"      <geometry>\n"
-        f'        <cylinder radius="{radius:g}" length="{height:g}"/>\n'
-        f"      </geometry>\n"
-        f"    </collision>\n"
-        f"  </link>\n"
-    )
-    return body + "".join(_mount_xml(m) for m in mounts) + "</robot>\n"
 
 
 # ---------------------------------------------------------------------------
@@ -236,51 +159,3 @@ def urdf_body_dims(urdf_text: str, base_dir: Optional[str] = None) -> Tuple[floa
         return height, radius
 
     raise ValueError(f"base link '{base.get('name')}' has unsupported geometry for dims")
-
-
-# ---------------------------------------------------------------------------
-# habitat-sim instantiation
-# ---------------------------------------------------------------------------
-def add_robot(
-    sim,
-    urdf: Optional[str] = None,
-    *,
-    height: float = DEFAULT_HEIGHT,
-    radius: float = DEFAULT_RADIUS,
-    lidar_height: Optional[float] = None,
-    fixed_base: bool = True,
-    **kwargs,
-):
-    """Instantiate the robot in ``sim`` as an articulated object.
-
-    Args:
-        sim: Habitat simulator with physics enabled.
-        urdf: Optional URDF file path. If omitted, a cylinder URDF is generated.
-        height: Generated cylinder height.
-        radius: Generated cylinder radius.
-        lidar_height: Legacy lidar mount height for generated URDF.
-        fixed_base: Whether habitat should create a fixed-base articulated object.
-        **kwargs: Forwarded to habitat-sim's URDF loader.
-
-    Returns:
-        The habitat-sim articulated object.
-    """
-    aom = sim.get_articulated_object_manager()
-
-    if urdf is not None:
-        return aom.add_articulated_object_from_urdf(
-            filepath=urdf, fixed_base=fixed_base, **kwargs
-        )
-
-    text = cylinder_urdf(height, radius, lidar_height)
-    tmp = None
-    try:
-        with tempfile.NamedTemporaryFile("w", suffix=".urdf", delete=False) as f:
-            f.write(text)
-            tmp = f.name
-        return aom.add_articulated_object_from_urdf(
-            filepath=tmp, fixed_base=fixed_base, **kwargs
-        )
-    finally:
-        if tmp is not None:
-            os.unlink(tmp)

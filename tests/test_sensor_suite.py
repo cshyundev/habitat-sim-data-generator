@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 import yaml
 
-from src.robot import cylinder_urdf
+from tests.robot_fixtures import cylinder_urdf
 from src.utils.tf import TFManager
 from src.sensors.suite import SensorSuite
 from src.sensors.base_sensor import BaseSensor

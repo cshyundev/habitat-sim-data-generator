@@ -4,7 +4,7 @@ import unittest
 
 import yaml
 
-from src.robot import cylinder_urdf
+from tests.robot_fixtures import cylinder_urdf
 from src.robot_config import ConfigError
 from src.runtime_config import (
     McapExportConfig,
