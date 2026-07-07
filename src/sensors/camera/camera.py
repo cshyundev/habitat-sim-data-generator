@@ -494,51 +494,41 @@ class CameraSensor(BaseSensor):
         obj = None
         sem = None
 
+        def get_sem() -> SemanticMap:
+            nonlocal sem
+            if sem is None:
+                sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(H, W)
+            return SemanticMap(sem)
+
+        def get_obj() -> InstanceMap:
+            nonlocal obj
+            if obj is None:
+                obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(H, W)
+            return InstanceMap(obj)
+
         if self._has_output("depth"):
             dist = np.where(hit, res.distance, 0.0).astype(np.float32)
             if self.depth_type == "planar":
                 dist = (dist * self._ray_cos).astype(np.float32)
             outputs["depth"] = DepthMap(dist.reshape(H, W))
 
-        needs_semantic = self._has_output("semantic") or self._has_output("bbox2d")
-        if needs_semantic:
-            sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(H, W)
-
-        needs_instance = (
-            self._has_output("instance")
-            or self._has_output("bbox2d")
-            or self._has_output("bbox3d")
-        )
-        if needs_instance:
-            obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(H, W)
-
         if self._has_output("semantic"):
-            if sem is None:
-                sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(H, W)
-            outputs["semantic"] = SemanticMap(sem)
+            outputs["semantic"] = get_sem()
 
         if self._has_output("instance"):
-            if obj is None:
-                obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(H, W)
-            outputs["instance"] = InstanceMap(obj)
+            outputs["instance"] = get_obj()
 
         if self._has_output("bbox2d"):
-            if sem is None:
-                sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(H, W)
-            if obj is None:
-                obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(H, W)
             self._ensure_detection_context(sim)
             outputs["bbox2d"] = boxes_from_maps(
-                obj, sem, self.scene.categories, self._bbox2d_min_box_px()
+                get_obj(), get_sem(), self.scene.categories, self._bbox2d_min_box_px()
             )
 
         if self._has_output("bbox3d"):
-            if obj is None:
-                obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(H, W)
             self._ensure_detection_context(sim)
             cam_pos, cam_quat = self.world_pose(motion_state)
             outputs["bbox3d"] = obbs_for_visible(
-                obj, self._world_obbs, cam_pos, cam_quat
+                get_obj(), self._world_obbs, cam_pos, cam_quat
             )
 
         return outputs

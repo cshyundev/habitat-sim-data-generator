@@ -31,6 +31,16 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
         """
         self.params = params if params is not None else ZigzagCoverageParams()
 
+    def _params_with_overrides(self, **kwargs) -> ZigzagCoverageParams:
+        p = self.params
+        return ZigzagCoverageParams(
+            resolution=kwargs.get("resolution", p.resolution),
+            wall_distance=kwargs.get("wall_distance", p.wall_distance),
+            zigzag_spacing=kwargs.get("zigzag_spacing", p.zigzag_spacing),
+            sweep_direction=kwargs.get("sweep_direction", p.sweep_direction),
+            start_corner=kwargs.get("start_corner", p.start_corner),
+        )
+
     def plan(
         self,
         sim: habitat_sim.Simulator,
@@ -48,13 +58,13 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
         Returns:
             PlanningResult with Waypoints and an ``occ_grid`` artifact.
         """
-        p = self.params
+        p = self._params_with_overrides(**kwargs)
         occ_grid = generate_occupancy_grid_from_sim(
             sim=sim,
             agent_height=kwargs.get("agent_height"),  # None -> read from sim agent.
             agent_radius=kwargs.get("agent_radius"),
-            resolution=kwargs.get("resolution", p.resolution),
-            obstacle_radius_m=kwargs.get("wall_distance", p.wall_distance),
+            resolution=p.resolution,
+            obstacle_radius_m=p.wall_distance,
         )
 
         # Waypoint height (Habitat Y): start_pose, else agent state, else 0.
@@ -69,12 +79,12 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
                     logger.debug("Could not read agent height from simulator: %s", exc)
                     height_offset = 0.0
 
-        waypoints = self.plan_from_map(
+        waypoints = self._plan_from_map(
             occ_grid, start_pose, height_offset=height_offset, **kwargs
         )
         return PlanningResult(waypoints=waypoints, artifacts={"occ_grid": occ_grid})
 
-    def plan_from_map(
+    def _plan_from_map(
         self,
         occ_grid: OccupancyGrid2D,
         start_pose: Optional[Pose3D] = None,
@@ -92,12 +102,12 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
         Returns:
             Coarse world-frame waypoints.
         """
-        p = self.params
+        p = self._params_with_overrides(**kwargs)
         resolution = occ_grid.resolution
-        wall_distance = kwargs.get("wall_distance", p.wall_distance)
-        zigzag_spacing = kwargs.get("zigzag_spacing", p.zigzag_spacing)
-        sweep_direction = kwargs.get("sweep_direction", p.sweep_direction)
-        start_corner = kwargs.get("start_corner", p.start_corner)
+        wall_distance = p.wall_distance
+        zigzag_spacing = p.zigzag_spacing
+        sweep_direction = p.sweep_direction
+        start_corner = p.start_corner
 
         safe_mask = bcd.compute_safe_mask(occ_grid, wall_distance, resolution)
 

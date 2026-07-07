@@ -13,7 +13,7 @@ Design boundary (intentional):
              change; the only contract with the renderer is "List[Pose3D]".
 
 Usage:
-  uv run python scripts/animate_path.py                 # real sim from config_stream.yaml
+  uv run python scripts/animate_path.py                 # real sim from config/config_stream.yaml
   uv run python scripts/animate_path.py --synthetic     # no sim; synthetic room grid
   uv run python scripts/animate_path.py --speed 4       # play 4x faster
   uv run python scripts/animate_path.py --save out.gif  # also write a GIF
@@ -39,8 +39,10 @@ from src.planners.map_converter import generate_occupancy_grid_from_sim
 
 
 # ==========================================================================
-# SWAPPABLE: planner block. Contract = (occ_grid, config) -> (poses, waypoints)
-# When the global/local planners change, only this function changes.
+# SWAPPABLE: planner block. Contract = (occ_grid, config) -> (poses, waypoints).
+# This script is an occupancy-grid preview, so it intentionally uses the
+# zigzag planner's grid helper instead of the BaseGlobalPlanner.plan(sim)
+# production boundary.
 # ==========================================================================
 def plan_poses(
     occ_grid: OccupancyGrid2D,
@@ -60,8 +62,9 @@ def plan_poses(
     from src.planners.global_planning import ZigzagCoveragePlanner, ZigzagCoverageParams
     from src.planners.local_planning import DifferentialDriveLocalPlanner, DifferentialDriveParams
 
-    global_planner = ZigzagCoveragePlanner(ZigzagCoverageParams.from_config(config))
-    waypoints = global_planner.plan_from_map(occ_grid)
+    global_params = ZigzagCoverageParams.from_config(config)
+    global_planner = ZigzagCoveragePlanner(global_params)
+    waypoints = global_planner._plan_from_map(occ_grid)
 
     local_planner = DifferentialDriveLocalPlanner(DifferentialDriveParams.from_config(config))
     local_planner.set_waypoints(waypoints)
@@ -182,7 +185,9 @@ def build_occ_from_sim(config: Dict[str, object]) -> OccupancyGrid2D:
     from src.sensors.suite import SensorSuite
     from src.simulator.factory import create_simulator
 
-    p_cfg = config.get("planner", {})
+    from src.planners.global_planning import ZigzagCoverageParams
+
+    params = ZigzagCoverageParams.from_config(config)
     robot = load_robot(config)
     sensor_suite = SensorSuite(robot, RaycastingConfig.from_config(config))
     sim = create_simulator(
@@ -191,8 +196,8 @@ def build_occ_from_sim(config: Dict[str, object]) -> OccupancyGrid2D:
     try:
         return generate_occupancy_grid_from_sim(
             sim=sim,
-            resolution=p_cfg.get("resolution", 0.05),
-            obstacle_radius_m=p_cfg.get("wall_distance", 0.3),
+            resolution=params.resolution,
+            obstacle_radius_m=params.wall_distance,
         )
     finally:
         sim.close()
@@ -222,7 +227,7 @@ def build_synthetic_occ(resolution: float = 0.05) -> OccupancyGrid2D:
 def main() -> None:
     """Run the CLI animation preview."""
     parser = argparse.ArgumentParser(description="Live 2D occ-grid path animation.")
-    parser.add_argument("--config", default="config_stream.yaml")
+    parser.add_argument("--config", default="config/config_stream.yaml")
     parser.add_argument("--synthetic", action="store_true",
                         help="Skip the simulator; use a synthetic room grid.")
     parser.add_argument("--robot-radius", type=float, default=0.15, help="Robot radius [m].")
@@ -238,7 +243,9 @@ def main() -> None:
 
     if args.synthetic:
         print("[1/3] Building synthetic occupancy grid...")
-        occ_grid = build_synthetic_occ(config.get("planner", {}).get("resolution", 0.05))
+        from src.planners.global_planning import ZigzagCoverageParams
+
+        occ_grid = build_synthetic_occ(ZigzagCoverageParams.from_config(config).resolution)
     else:
         print("[1/3] Loading simulator and converting to occupancy grid...")
         occ_grid = build_occ_from_sim(config)

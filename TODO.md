@@ -197,7 +197,7 @@ mistyped payload — a bug surfaces as a quietly empty MCAP channel. Raise
 instead. Also the `if cloud is None` checks after the isinstance guard are
 unreachable; delete.
 
-### 17. `_observe_raycast` sem/obj recompute dance
+### 17. `_observe_raycast` sem/obj recompute dance — DONE
 **Where:** `src/sensors/camera/camera.py:492-524` — the
 `np.where(hit, ...).reshape(H, W)` expression appears 3x for `sem`, 4x for
 `obj`, mixed with a `needs_semantic`/`needs_instance` pre-pass plus
@@ -209,7 +209,7 @@ unreachable; delete.
   tests (the pipeline never instantiates the robot body in the sim). Move to a
   test helper or document that they are fixtures.
 - `zigzag_coverage.plan` and `plan_from_map` both repeat the same
-  `kwargs.get("wall_distance", p.wall_distance)` override layer.
+  `kwargs.get("wall_distance", p.wall_distance)` override layer. — DONE
 - `camera._build_model` re-validates `intrinsic` already validated in
   `__init__`, and required-param errors surface as raw `KeyError`
   (`p["radial"]`) instead of a contextual message.
