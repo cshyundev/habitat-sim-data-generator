@@ -49,6 +49,13 @@ def _as_builtin(value: object) -> object:
     return value
 
 
+def _camera_intrinsic_values(parameters: Dict[str, object]) -> tuple[float, float, float, float]:
+    intrinsic = parameters["intrinsic"]
+    if not isinstance(intrinsic, (list, tuple)) or len(intrinsic) != 4:
+        raise ValueError("camera intrinsic must be [fx, fy, cx, cy].")
+    return tuple(float(v) for v in intrinsic)
+
+
 @register_sensor("camera")
 class CameraSensor(BaseSensor):
     """
@@ -82,10 +89,7 @@ class CameraSensor(BaseSensor):
         if "hfov" in parameters:
             self.hfov = float(parameters["hfov"])
         elif "intrinsic" in parameters:
-            intrinsic = parameters["intrinsic"]
-            if not isinstance(intrinsic, (list, tuple)) or len(intrinsic) != 4:
-                raise ValueError("camera intrinsic must be [fx, fy, cx, cy].")
-            fx = float(intrinsic[0])
+            fx = _camera_intrinsic_values(parameters)[0]
             self.hfov = math.degrees(2.0 * math.atan(self.width / (2.0 * fx)))
         else:
             self.hfov = 90.0
@@ -146,6 +150,23 @@ class CameraSensor(BaseSensor):
     def _has_output(self, output_name: str) -> bool:
         return output_name in self.modalities
 
+    def _required_param(self, key: str) -> object:
+        if key not in self.parameters:
+            raise ValueError(
+                f"CameraSensor '{self.name}' model '{self.model}' requires "
+                f"parameter '{key}'."
+            )
+        return self.parameters[key]
+
+    def _required_tuple_param(self, key: str) -> tuple[object, ...]:
+        value = self._required_param(key)
+        if not isinstance(value, (list, tuple, np.ndarray)):
+            raise ValueError(
+                f"CameraSensor '{self.name}' model '{self.model}' parameter "
+                f"'{key}' must be a sequence."
+            )
+        return tuple(value)
+
     # ------------------------------------------------------------------
     # Model construction
     # ------------------------------------------------------------------
@@ -156,10 +177,7 @@ class CameraSensor(BaseSensor):
 
         if self.model in _PINHOLE_LIKE:
             if "intrinsic" in p:
-                intrinsic = p["intrinsic"]
-                if not isinstance(intrinsic, (list, tuple)) or len(intrinsic) != 4:
-                    raise ValueError("camera intrinsic must be [fx, fy, cx, cy].")
-                fx, fy, cx, cy = [float(v) for v in intrinsic]
+                fx, fy, cx, cy = _camera_intrinsic_values(p)
                 cam_dict = {
                     "image_size": image_size,
                     "focal_length": (fx, fy),
@@ -195,10 +213,10 @@ class CameraSensor(BaseSensor):
             return OpenCVFisheyeCamera(
                 {
                     "image_size": image_size,
-                    "focal_length": tuple(p["focal_length"]),
-                    "principal_point": tuple(p["principal_point"]),
+                    "focal_length": self._required_tuple_param("focal_length"),
+                    "principal_point": self._required_tuple_param("principal_point"),
                     "skew": p.get("skew", 0.0),
-                    "radial": p["radial"],  # [k1,k2,k3,k4]
+                    "radial": self._required_param("radial"),  # [k1,k2,k3,k4]
                 }
             )
 
@@ -206,11 +224,11 @@ class CameraSensor(BaseSensor):
             return ThinPrismFisheyeCamera(
                 {
                     "image_size": image_size,
-                    "focal_length": tuple(p["focal_length"]),
-                    "principal_point": tuple(p["principal_point"]),
-                    "radial": p["radial"],  # [k1,k2,k3,k4]
-                    "tangential": p["tangential"],  # [p1,p2]
-                    "prism": p["prism"],  # [sx1,sy1]
+                    "focal_length": self._required_tuple_param("focal_length"),
+                    "principal_point": self._required_tuple_param("principal_point"),
+                    "radial": self._required_param("radial"),  # [k1,k2,k3,k4]
+                    "tangential": self._required_param("tangential"),  # [p1,p2]
+                    "prism": self._required_param("prism"),  # [sx1,sy1]
                 }
             )
 
@@ -218,10 +236,10 @@ class CameraSensor(BaseSensor):
             return DoubleSphereCamera(
                 {
                     "image_size": image_size,
-                    "focal_length": tuple(p["focal_length"]),
-                    "principal_point": tuple(p["principal_point"]),
-                    "xi": p["xi"],
-                    "alpha": p["alpha"],
+                    "focal_length": self._required_tuple_param("focal_length"),
+                    "principal_point": self._required_tuple_param("principal_point"),
+                    "xi": self._required_param("xi"),
+                    "alpha": self._required_param("alpha"),
                     "fov_deg": p.get("fov_deg", 180.0),
                 }
             )
@@ -230,9 +248,9 @@ class CameraSensor(BaseSensor):
             return OmnidirectionalCamera(
                 {
                     "image_size": image_size,
-                    "distortion_center": tuple(p["distortion_center"]),
-                    "poly_coeffs": p["poly_coeffs"],
-                    "inv_poly_coeffs": p["inv_poly_coeffs"],
+                    "distortion_center": self._required_tuple_param("distortion_center"),
+                    "poly_coeffs": self._required_param("poly_coeffs"),
+                    "inv_poly_coeffs": self._required_param("inv_poly_coeffs"),
                     "affine": p.get("affine", [1.0, 0.0, 0.0]),
                     "fov_deg": p.get("fov_deg", 180.0),
                 }

@@ -212,4 +212,4 @@ unreachable; delete.
   `kwargs.get("wall_distance", p.wall_distance)` override layer. — DONE
 - `camera._build_model` re-validates `intrinsic` already validated in
   `__init__`, and required-param errors surface as raw `KeyError`
-  (`p["radial"]`) instead of a contextual message.
+  (`p["radial"]`) instead of a contextual message. — DONE

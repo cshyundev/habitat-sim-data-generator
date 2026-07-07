@@ -41,6 +41,18 @@ class _Raycaster:
 
 
 class TestCameraSensor(unittest.TestCase):
+    def _camera_with_params(self, parameters):
+        return CameraSensor(
+            name="camera_front",
+            sensor_type="camera",
+            parent_link="camera_link",
+            hz=10,
+            parameters={"width": 2, "height": 2, **parameters},
+            tf_manager=_TF(),
+            scene=_Raycaster(),
+            output_names=["depth"],
+        )
+
     def test_multi_modality_outputs_share_one_raycast(self):
         raycaster = _Raycaster()
         cam = CameraSensor(
@@ -85,6 +97,42 @@ class TestCameraSensor(unittest.TestCase):
         self.assertEqual(obs["instance"][0, 0], 7)
         self.assertEqual(obs["bbox2d"][0].xyxy, (0, 0, 1, 1))
         self.assertEqual(obs["bbox3d"]["world"][0].instance_id, 7)
+
+    def test_missing_required_camera_model_param_raises_value_error(self):
+        cases = [
+            (
+                {
+                    "model": "opencv_fisheye",
+                    "focal_length": [1.0, 1.0],
+                    "principal_point": [1.0, 1.0],
+                },
+                "radial",
+            ),
+            (
+                {
+                    "model": "doublesphere",
+                    "focal_length": [1.0, 1.0],
+                    "principal_point": [1.0, 1.0],
+                    "alpha": 0.5,
+                },
+                "xi",
+            ),
+            (
+                {
+                    "model": "omnidirect",
+                    "distortion_center": [1.0, 1.0],
+                    "poly_coeffs": [1.0, 0.0],
+                },
+                "inv_poly_coeffs",
+            ),
+        ]
+        for parameters, missing_key in cases:
+            with self.subTest(model=parameters["model"], missing=missing_key):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    f"model '{parameters['model']}' requires parameter '{missing_key}'",
+                ):
+                    self._camera_with_params(parameters)
 
 
 if __name__ == "__main__":
