@@ -56,10 +56,15 @@ class TestGlobalPlanner(unittest.TestCase):
         planner = ZigzagCoveragePlanner()
         self.assertIsInstance(planner, BaseGlobalPlanner)
 
-    def test_plan_from_map_returns_waypoints(self):
-        """plan_from_map returns coarse, orientation-less, in-bounds waypoints."""
+    def test_plan_returns_waypoints(self):
+        """plan returns coarse, orientation-less, in-bounds waypoints."""
         planner = ZigzagCoveragePlanner()
-        waypoints = planner.plan_from_map(self.occ_grid, **self.overrides)
+        with patch(
+            "src.planners.global_planning.zigzag_coverage.generate_occupancy_grid_from_sim",
+            return_value=self.occ_grid,
+        ):
+            result = planner.plan(sim=object(), **self.overrides)
+        waypoints = result.waypoints
 
         self.assertIsInstance(waypoints, list)
         self.assertGreaterEqual(len(waypoints), 2)
@@ -101,7 +106,11 @@ class TestGlobalPlanner(unittest.TestCase):
     def test_waypoints_are_coarse(self):
         """Coarse turn points: far fewer waypoints than free grid cells."""
         planner = ZigzagCoveragePlanner()
-        waypoints = planner.plan_from_map(self.occ_grid, **self.overrides)
+        with patch(
+            "src.planners.global_planning.zigzag_coverage.generate_occupancy_grid_from_sim",
+            return_value=self.occ_grid,
+        ):
+            waypoints = planner.plan(sim=object(), **self.overrides).waypoints
 
         free_cells = int(np.count_nonzero(self.occ_grid.data == GRID_2D_FREE))
         self.assertGreater(len(waypoints), 0)

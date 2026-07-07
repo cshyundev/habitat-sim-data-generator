@@ -17,9 +17,9 @@ _DT_NS = 50_000_000  # 50ms trajectory sampling step for local-planner playback.
 
 def _plan_poses(occ_grid: OccupancyGrid2D, **global_kwargs) -> List[Pose3D]:
     """Runs the global (coverage) -> local (differential drive) planner pipeline
-    and returns dense Pose3D samples, mirroring the old monolithic planner's output."""
+    from an existing grid and returns dense Pose3D samples for map-converter tests."""
     global_planner = ZigzagCoveragePlanner()
-    waypoints = global_planner.plan_from_map(occ_grid, **global_kwargs)
+    waypoints = global_planner._plan_from_map(occ_grid, **global_kwargs)
 
     local_params = DifferentialDriveParams(
         linear_velocity=0.3, linear_acceleration=0.5,
