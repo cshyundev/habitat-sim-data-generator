@@ -53,7 +53,10 @@ def main():
 
     try:
         logger.info("3. Build Data Pipeline...")
-        pipeline = build_pipeline(config, sim, sensor_suite)
+        pipeline = build_pipeline(
+            config, sim, sensor_suite,
+            max_duration_ns=runtime_config.max_duration_ns,
+        )
         logger.info("   - length of trajectory: %.2fs", pipeline.duration_ns / 1e9)
 
         sinks = []
@@ -65,7 +68,6 @@ def main():
             logger.info("   - MCAP Output Path: %s", mcap_path)
 
         if args.visualize:
-            # Imported lazily so the data-only path needs no rerun install.
             sinks.append(VisualizationSink(RerunBackend()))
             logger.info("   - Live Rerun Visualization activated")
 

@@ -34,49 +34,60 @@ contradicting the inline comment. Fix: move the import inside
 
 ## P1 — Duplicated logic / responsibility leaks
 
-### 3. Camera vs detections extractors: line-for-line duplication
-**Where:** `src/sensors/camera/camera.py:453-475` (`_bbox2d_from_maps`) vs
-`src/detections/bbox2d.py` (`BBox2DExtractor.extract`); and
-`camera.py:522-533` (bbox3d block) vs `src/detections/bbox3d.py`
-(`BBox3DExtractor.extract`).
-**Cause:** the camera inlined the extractor logic (down to the same bincount
-loop), and the extractors are now used only by `scripts/` and tests. Two copies
-of the same algorithm means one-sided fixes are guaranteed eventually. Either
-have the camera delegate to the extractors, or delete the extractors and point
-the scripts at the camera path.
+> **Status (this pass):** items 3, 4, and 6 are DONE; item 5 landed at its
+> minimal scope (camera reuses the raycaster's `SceneModel` for bbox3d) — the
+> larger single-source consolidation is still OPEN (see item 5).
 
-### 4. Validated `RuntimeConfig` is discarded; raw dict re-parsed downstream
-**Where:** `stream_data.py:45` creates `RuntimeConfig` then only logs from it.
-**Cause:** every layer below re-parses the same sections from the raw dict:
-- `McapExportConfig.from_config` runs twice on the same path —
-  `McapSink.on_start` (`src/pipeline/mcap_sink.py:97`) and again inside
-  `McapExporter.start` (`src/utils/export.py:152`).
-- `max_duration_ns_from_config` (`src/runtime_config.py:271`) re-validates what
-  `RuntimeConfig.max_duration_sec` already validated.
-- `RaycastingConfig.from_config` re-parsed in `RayCaster` and again in
-  `CameraSensor._ensure_detection_context` (`camera.py:449`).
-Fix: pass `RuntimeConfig` (or its sub-configs) down through
-`build_pipeline`/`McapSink`/`SensorSuite` and delete the dict re-parsing
-helpers. Validate once at the entry point; only typed objects flow after.
+### 3. Camera vs detections extractors: line-for-line duplication — DONE
+The bbox algorithm now lives once in shared module-level functions:
+`boxes_from_maps` (`src/detections/bbox2d.py`) and `obbs_for_visible`
+(`src/detections/bbox3d.py`). The camera's `_observe_raycast` and the
+`BBox2DExtractor`/`BBox3DExtractor` classes both delegate to them; the extractor
+classes stay as thin cast-then-call wrappers for `scripts/` and tests (delegating
+avoids a second raycast in the streaming path, where the camera already holds the
+instance/class maps).
 
-### 5. Scene mesh loading exists twice (+ a third redundant extraction)
-**Where:** `src/utils/coords.py:202-367` (`extract_visual_map_as_markers`) vs
-`src/raycasting/scene_extractor.py`.
-**Cause:** both resolve asset paths and load stage + rigid + articulated meshes
-via trimesh, into different output shapes. Additionally the camera's bbox3d
-path calls `extract_scene_model` again (`camera.py:450`) even though the MLX
-backend already extracted the same scene in `bind()` — a heavy duplicate pass.
-Fix (larger, separate task): make `SceneModel` the single source and derive
-markers/OBBs from it; at minimum reuse the raycaster's already-built model for
-bbox3d. Related: `coords.py` is a grab-bag — pure coordinate transforms (keep)
-mixed with occupancy conversion, the 165-line marker extractor, and URDF visual
-parsing; the scene logic belongs elsewhere.
+### 4. Validated `RuntimeConfig` no longer re-parsed downstream — DONE (targeted)
+Killed the concrete double-parses (full `RuntimeConfig` threading through every
+signature was intentionally left out of scope):
+- `McapExportConfig.from_config` ran twice — now `McapExporter.start` parses once
+  and stores `self.export_config`, and `McapSink.on_start` reads it back
+  (`src/utils/export.py`, `src/pipeline/mcap_sink.py`).
+- `max_duration_ns_from_config` deleted; `RuntimeConfig.max_duration_ns`
+  (validated at entry) is threaded via `build_pipeline` into `StreamingPipeline`.
+- The camera's `RaycastingConfig.from_config` re-parse is gone (folded into item 5:
+  the camera reuses the raycaster's model instead of re-extracting with its own
+  parsed geometry).
+The single legitimate `RaycastingConfig` parse for backend selection stays (now
+in `raycasting.build_backend`, used by `Scene`).
 
-### 6. `build_category_names(sim)` computed twice
-**Where:** `src/pipeline/streaming.py:148` (into `StreamContext`) and
-`CameraSensor._ensure_detection_context` (`camera.py:444`).
-**Cause:** the pipeline already owns the category table; inject it into the
-camera instead of rebuilding per sensor.
+### 5. Scene mesh loading — minimal reuse DONE; consolidation still OPEN
+DONE: the camera's bbox3d path reuses the `SceneModel` the shared `Scene` already
+built in `bind()` (via `scene.model`, backed by the `scene_model` accessor on
+`RaycastBackend`/`MLXRaycaster`), instead of a third `extract_scene_model` pass.
+It falls back to `extract_scene_model` only when the backend holds no model (the
+`sim` backend). Verified: one scene extraction per run.
+
+STILL OPEN (the "larger, separate task"): `extract_visual_map_as_markers`
+(`src/utils/coords.py:202-367`) still loads stage+rigid+articulated meshes a
+second time in a different output shape. Make `SceneModel` the single source and
+derive the ROS markers from it; dedupe the two `parse_urdf_visuals` copies
+(`coords.py` vs `scene_extractor.py`); and relocate the scene/mesh logic out of
+`coords.py` (which should keep only pure coordinate transforms + occupancy
+conversion).
+
+### 6. `build_category_names(sim)` computed once — DONE (via Scene)
+Root-caused instead of plumbed: the camera only needed categories (and geometry)
+because they're **scene-derived facts**, so both now live on a single `Scene`
+abstraction (`src/scene.py`) that the sensors already hold in place of the old
+`RayCaster`. `Scene` owns geometry (`model`), semantics (`categories`), and
+ray-casting (`cast_rays`); `Scene.bind(sim)` builds categories + BVH once, and
+`create_simulator` binds it right after the sim exists so both are ready before
+capture. The camera reads `self.scene.categories` / `self.scene.model`; the
+pipeline reads `sensor_suite.scene.categories` for the MCAP sidecar. No per-sensor
+category attribute, no injection loop — `build_category_names` runs exactly once.
+(This also subsumes item 5's minimal reuse: the camera's bbox3d uses
+`scene.model`, falling back to `extract_scene_model` only for the `sim` backend.)
 
 ## P2 — Sensor layer boilerplate (do before adding the next sensor)
 

@@ -21,7 +21,7 @@ class IdealLiDAR3D(LiDAR3D):
         hz: int,
         parameters: dict,
         tf_manager: Any,
-        raycaster: Any = None,
+        scene: Any = None,
         config: Optional[dict] = None,
         output_names: Optional[list] = None,
         output_params: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -36,7 +36,7 @@ class IdealLiDAR3D(LiDAR3D):
             hz=hz,
             parameters=parameters,
             tf_manager=tf_manager,
-            raycaster=raycaster,
+            scene=scene,
             config=config,
             output_names=output_names,
             output_params=output_params,
@@ -84,8 +84,8 @@ class IdealLiDAR3D(LiDAR3D):
         Returns:
             PointCloud with points in the lidar sensor frame.
         """
-        if self.raycaster is None:
-            raise RuntimeError("LiDAR3D requires a RayCaster; no sim.cast_ray fallback is created.")
+        if self.scene is None:
+            raise RuntimeError("LiDAR3D requires a Scene; no sim.cast_ray fallback is created.")
 
         H, W = self.altitude_bins, self.azimuth_bins
 
@@ -105,9 +105,9 @@ class IdealLiDAR3D(LiDAR3D):
 
         # Batched ray cast through the shared backend. Origins are the (single)
         # sensor world position broadcast to every ray.
-        self.raycaster.bind(sim)  # idempotent; ensures the backend is ready
+        self.scene.bind(sim)  # idempotent; ensures the backend is ready
         origins = np.broadcast_to(sensor_pos_global, flat_directions_global.shape)
-        res = self.raycaster.cast_rays(
+        res = self.scene.cast_rays(
             origins,
             flat_directions_global,
             min_distance=self.min_distance,

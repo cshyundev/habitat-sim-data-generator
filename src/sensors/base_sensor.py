@@ -17,7 +17,7 @@ class BaseSensor(abc.ABC):
         hz: int,
         parameters: Dict[str, Any],
         tf_manager: Any,
-        raycaster: Any = None,
+        scene: Any = None,
         config: Optional[dict] = None,
         output_names: Optional[list] = None,
         output_params: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -32,8 +32,9 @@ class BaseSensor(abc.ABC):
             hz: Update frequency of the sensor.
             parameters: Dictionary containing sensor-specific parameters.
             tf_manager: TFManager instance to fetch link transforms.
-            raycaster: Shared ``RayCaster`` used for ray-based sensing. Ray-based
-                sensors require this to be supplied by ``SensorSuite`` or tests.
+            scene: Shared :class:`~src.scene.Scene` (geometry + semantics +
+                ray-casting) used for ray-based sensing and detections. Ray-based
+                sensors require it to be supplied by ``SensorSuite`` or tests.
                 IMU-like sensors ignore it; it is held for interface uniformity.
             output_names/output_params: Generation hints owned by SensorSuite.
                 BaseSensor accepts them for a uniform constructor but does not
@@ -46,8 +47,7 @@ class BaseSensor(abc.ABC):
         self.parameters = parameters
         self.config = config or {}
         self.tf_manager = tf_manager
-        self.raycaster = raycaster
-
+        self.scene = scene
     @classmethod
     def validate_outputs(cls, outputs: Dict[str, Any]) -> None:
         """Validate sensor-specific output names. Subclasses may override."""

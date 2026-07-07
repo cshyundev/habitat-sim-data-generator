@@ -86,7 +86,7 @@ def main():
 
     inst_cam = _find(suite, name=det_cfg["bbox2d"]["camera"])
     rgb_cam = _find(suite, modality="rgb")
-    suite.raycaster.bind(sim)
+    suite.scene.bind(sim)
     scene_model = extract_scene_model(sim, config.get("raycasting", {}).get("geometry", "visual"))
     cats = build_category_names(sim)
     ext2d = BBox2DExtractor(inst_cam, cats, det_cfg["bbox2d"].get("min_box_px", 8))

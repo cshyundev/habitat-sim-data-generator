@@ -12,9 +12,8 @@ see ``scripts/bench_raycast.py`` for the speed/accuracy comparison.
 from src.raycasting.types import RaycastResult
 from src.raycasting.scene import ObjectMesh, SceneModel
 from src.raycasting.scene_extractor import extract_scene_model, read_dynamic_transforms
-from src.raycasting.backend import RaycastBackend, SimRaycastBackend
+from src.raycasting.backend import RaycastBackend, SimRaycastBackend, build_backend
 from src.raycasting.mlx_backend import MLXRaycaster
-from src.raycasting.raycaster import RayCaster
 
 __all__ = [
     "RaycastResult",
@@ -24,6 +23,6 @@ __all__ = [
     "read_dynamic_transforms",
     "RaycastBackend",
     "SimRaycastBackend",
+    "build_backend",
     "MLXRaycaster",
-    "RayCaster",
 ]

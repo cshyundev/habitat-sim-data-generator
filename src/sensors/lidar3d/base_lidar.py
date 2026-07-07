@@ -18,7 +18,7 @@ class LiDAR3D(BaseSensor, abc.ABC):
         hz: int,
         parameters: dict,
         tf_manager: Any,
-        raycaster: Any = None,
+        scene: Any = None,
         config: Optional[dict] = None,
         output_names: Optional[list] = None,
         output_params: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -33,7 +33,7 @@ class LiDAR3D(BaseSensor, abc.ABC):
             hz=hz,
             parameters=parameters,
             tf_manager=tf_manager,
-            raycaster=raycaster,
+            scene=scene,
             config=config,
             output_names=output_names,
             output_params=output_params,
@@ -97,9 +97,6 @@ class LiDAR3D(BaseSensor, abc.ABC):
         flat_ranges = range_image.flatten()
         valid_mask = (flat_ranges >= self.min_distance) & (flat_ranges <= self.max_distance) & (~np.isinf(flat_ranges))
         
-        if not np.any(valid_mask):
-            return np.empty((0, 4 if semantic_image is not None else 3), dtype=np.float32)
-
         valid_ranges = flat_ranges[valid_mask]
         flat_directions = self.ray_directions.reshape(-1, 3)
         valid_directions = flat_directions[valid_mask]

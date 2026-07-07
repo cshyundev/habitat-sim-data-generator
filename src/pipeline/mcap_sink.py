@@ -94,7 +94,8 @@ class McapSink(StreamSink):
     def on_start(self, ctx: StreamContext) -> None:
         self.exporter = McapExporter(self.mcap_path, self.config)
         self.exporter.start()
-        export_config = McapExportConfig.from_config(self.config)
+        # Reuse the config the exporter already parsed in start() (parse once).
+        export_config = self.exporter.export_config
         sensor_channels = _resolve_sensor_channels(ctx, export_config)
 
         # Dynamic sensor output channels.

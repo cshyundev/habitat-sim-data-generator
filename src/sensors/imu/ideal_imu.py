@@ -33,12 +33,12 @@ class IdealIMU(BaseSensor):
         hz: int,
         parameters: dict,
         tf_manager: Any,
-        raycaster: Any = None,
+        scene: Any = None,
         config: Optional[dict] = None,
         output_names: Optional[list] = None,
         output_params: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
-        # IMU does not ray-cast; ``raycaster`` is accepted only for a uniform
+        # IMU does not ray-cast; ``scene`` is accepted only for a uniform
         # sensor constructor signature.
         super().__init__(
             name=name,
@@ -47,7 +47,7 @@ class IdealIMU(BaseSensor):
             hz=hz,
             parameters=parameters,
             tf_manager=tf_manager,
-            raycaster=raycaster,
+            scene=scene,
             config=config,
             output_names=output_names,
             output_params=output_params,

@@ -138,6 +138,7 @@ class McapExporter:
         self.writer: Optional[Ros2Writer] = None
         self.schemas = {}   # schema_name -> mcap.records.Schema
         self.channels = {}  # channel_key -> (topic, Schema)
+        self.export_config = None  # parsed McapExportConfig (set in start())
 
     def start(self) -> None:
         """Opens the output file, initializes the writer, and registers schemas/channels."""
@@ -148,9 +149,10 @@ class McapExporter:
         self.file = open(self.mcap_path, "wb")
         self.writer = Ros2Writer(self.file)
 
-        # Register channels defined in config["mcap_export"]["channels"]
-        export_config = McapExportConfig.from_config(self.config)
-        for key, val in export_config.channels.items():
+        # Register channels defined in config["mcap_export"]["channels"].
+        # Parsed once here and stored so the owning sink can reuse it.
+        self.export_config = McapExportConfig.from_config(self.config)
+        for key, val in self.export_config.channels.items():
             self.register_channel_dynamic(key, val.topic, val.schema)
 
     def register_channel_dynamic(self, key: str, topic: str, schema_name: str) -> None:

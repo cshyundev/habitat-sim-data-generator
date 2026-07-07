@@ -221,6 +221,14 @@ class RuntimeConfig:
     raycasting: RaycastingConfig
     mcap_export: McapExportConfig
 
+    @property
+    def max_duration_ns(self) -> Optional[int]:
+        """Trajectory cap in nanoseconds (validated once here), or ``None`` for
+        uncapped. Downstream consumers take this instead of re-parsing the dict."""
+        if self.max_duration_sec is None:
+            return None
+        return int(self.max_duration_sec * 1e9)
+
     @classmethod
     def from_config(cls, config: dict) -> "RuntimeConfig":
         allowed = {
@@ -266,16 +274,3 @@ class RuntimeConfig:
 
 def validate_runtime_config(config: dict) -> RuntimeConfig:
     return RuntimeConfig.from_config(config)
-
-
-def max_duration_ns_from_config(config: dict) -> Optional[int]:
-    planner_section = config.get("planner", {}) or {}
-    if not isinstance(planner_section, dict):
-        raise ConfigError("planner: must be a mapping.")
-    max_duration = planner_section.get("max_duration_sec")
-    if max_duration is None:
-        return None
-    max_duration = float(max_duration)
-    if max_duration <= 0:
-        raise ConfigError("planner.max_duration_sec: must be positive when provided.")
-    return int(max_duration * 1e9)

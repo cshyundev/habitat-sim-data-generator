@@ -15,6 +15,25 @@ from src.datatypes.bbox import OBB3D
 from src.detections.obb import global_obbs, obb_to_camera
 
 
+def obbs_for_visible(
+    obj: np.ndarray,
+    world_obbs: Dict[int, OBB3D],
+    cam_pos: np.ndarray,
+    cam_quat: np.ndarray,
+) -> Dict[str, List[OBB3D]]:
+    """Return ``{"camera": [OBB3D], "world": [OBB3D]}`` for the instances present
+    in the instance map ``obj`` (0 = no hit), using precomputed world-frame OBBs.
+
+    ``camera`` is the Habitat sensor-local frame, ``world`` the Habitat world
+    frame; same instances, same order. The single source for the 3D-box
+    projection, shared by ``BBox3DExtractor`` and the camera's raycast path.
+    """
+    visible = [int(o) for o in np.unique(obj) if int(o) != 0]
+    world = [world_obbs[o] for o in visible if o in world_obbs]
+    camera = [obb_to_camera(w, cam_pos, cam_quat) for w in world]
+    return {"camera": camera, "world": world}
+
+
 class BBox3DExtractor:
     def __init__(self, camera, scene_model, categories: Dict[int, str]):
         """
@@ -36,9 +55,5 @@ class BBox3DExtractor:
         same order.
         """
         obj, _ = self.camera.cast_ids(sim, motion_state)
-        visible = [int(o) for o in np.unique(obj) if int(o) != 0]
-
         cam_pos, cam_quat = self.camera.world_pose(motion_state)
-        world = [self.world_obbs[o] for o in visible if o in self.world_obbs]
-        camera = [obb_to_camera(w, cam_pos, cam_quat) for w in world]
-        return {"camera": camera, "world": world}
+        return obbs_for_visible(obj, self.world_obbs, cam_pos, cam_quat)

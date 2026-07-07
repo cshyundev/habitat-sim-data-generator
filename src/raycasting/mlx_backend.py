@@ -250,6 +250,12 @@ class MLXRaycaster(RaycastBackend):
             self.num_triangles,
         )
 
+    @property
+    def scene_model(self):
+        """The extracted scene built in :meth:`bind`/:meth:`build` (``None`` until
+        then). Exposed so detection consumers reuse it instead of re-extracting."""
+        return self._model
+
     def sync(self, sim) -> None:
         """Refresh moved-object transforms (only if ``dynamic`` and already built)."""
         if not self._built or not self.dynamic:

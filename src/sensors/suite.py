@@ -6,7 +6,7 @@ from src.datatypes.motion_state import MotionState
 from src.sensors.base_sensor import BaseSensor
 from src.sensors.registry import get_sensor_class
 from src.robot_config import RobotBundle, SensorSpec
-from src.raycasting.raycaster import RayCaster
+from src.scene import Scene
 import src.sensors.builtin  # noqa: F401  (registers the built-in sensor types)
 
 _NS_PER_SEC = 1_000_000_000
@@ -24,14 +24,18 @@ class SensorSuite:
             robot: Validated RobotBundle (from robot_config.load_robot) supplying
                 the link frame tree and sensor specs. The robot's body dimensions
                 live on the RobotBundle -- SensorSuite manages sensors/TF only.
-            config: Full yaml config dict (used for ray-caster backend selection).
+            config: Full yaml config dict (used for scene/ray-caster backend selection).
+
+        Note: the Scene is built here but not yet bound -- its geometry and
+        category table come from the sim (which postdates the suite), so it is
+        bound once after the sim is created (see ``create_simulator``).
         """
         # 1. Initialize TF Manager from the URDF-derived frame tree.
         self.tf_manager = TFManager(robot.frames)
 
-        # 2. Shared ray-caster (selects its backend from config; GPU default). One
-        #    instance is shared by every sensor so geometry is extracted/built once.
-        self.raycaster = RayCaster(config)
+        # 2. Shared Scene (geometry + semantics + ray-casting; backend from config).
+        #    One instance is shared by every sensor so it is extracted/built once.
+        self.scene = Scene(config)
         self.config = config
 
         # 3. Build Sensors
@@ -63,7 +67,7 @@ class SensorSuite:
                 hz=spec.hz,
                 parameters=spec.parameters,
                 tf_manager=self.tf_manager,
-                raycaster=self.raycaster,
+                scene=self.scene,
                 config=self.config,
                 output_names=list(spec.outputs),
                 output_params={name: out.params for name, out in spec.outputs.items()},
@@ -152,10 +156,10 @@ class SensorSuite:
         The caller must have already applied ``motion_state.pose`` to the
         simulator's agent (native sensors render from the sim's current pose).
         """
-        # Prepare the shared ray-caster: build once (lazy), then refresh any moved
+        # Prepare the shared Scene: bind once (idempotent), then refresh any moved
         # geometry. Done here (once per capture) rather than per sensor.
-        self.raycaster.bind(sim)
-        self.raycaster.sync(sim)
+        self.scene.bind(sim)
+        self.scene.sync(sim)
 
         observations: Dict[str, Dict[str, Any]] = {}
         for sensor in sensors:

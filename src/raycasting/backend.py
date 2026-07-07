@@ -1,4 +1,4 @@
-"""Swappable ray-casting backend interface (the engine a ``RayCaster`` holds).
+"""Swappable ray-casting backend interface (the engine a ``Scene`` holds).
 
 A backend is the interchangeable part: it knows how to prepare itself from the live
 sim (:meth:`bind`), refresh dynamic state (:meth:`sync`), and intersect a batch of
@@ -7,20 +7,25 @@ rays (:meth:`cast_rays`). The same interface is implemented by:
 * :class:`SimRaycastBackend` -- loops ``sim.cast_ray`` (CPU; the original behavior),
 * :class:`~src.raycasting.mlx_backend.MLXRaycaster` -- Apple Metal two-level BVH.
 
-:class:`~src.raycasting.raycaster.RayCaster` is the single sensor-facing class; it
-holds one ``RaycastBackend`` and you swap the backend to change the engine.
+:class:`~src.scene.Scene` is the single sensor-facing class; it holds one
+``RaycastBackend`` (built by :func:`build_backend`) and you swap the backend to
+change the engine.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import logging
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 import magnum as mn
 import habitat_sim
 
 from src.raycasting.types import RaycastResult
+
+if TYPE_CHECKING:
+    from src.raycasting.scene import SceneModel
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +39,14 @@ class RaycastBackend(ABC):
 
     def sync(self, sim: "habitat_sim.Simulator") -> None:
         """Refresh dynamic state (moved objects) before a capture. Default: no-op."""
+
+    @property
+    def scene_model(self) -> Optional["SceneModel"]:
+        """The ``SceneModel`` this backend extracted while binding, if any. BVH
+        backends build one and can share it (e.g. for bbox3d); backends that
+        query the sim directly (:class:`SimRaycastBackend`) hold none. ``None``
+        before :meth:`bind`."""
+        return None
 
     @abstractmethod
     def cast_rays(
@@ -129,3 +142,24 @@ class SimRaycastBackend(RaycastBackend):
                     np.arccos(np.clip(abs(float(np.dot(d, nv))), 0.0, 1.0))
                 )
         return result
+
+
+def build_backend(config: dict) -> RaycastBackend:
+    """Select and construct the ray-casting backend from the runtime config's
+    ``raycasting`` section. Defaults to the GPU (MLX) backend; ``sim`` is the
+    CPU reference. The GPU stack is imported lazily so a sim-only deployment
+    never needs it."""
+    from src.runtime_config import RaycastingConfig
+
+    rc = RaycastingConfig.from_config(config or {})
+    if rc.backend == "sim":
+        return SimRaycastBackend()
+    if rc.backend in ("gpu", "mlx"):
+        from src.raycasting.mlx_backend import MLXRaycaster
+
+        return MLXRaycaster(
+            leaf_size=rc.leaf_size,
+            geometry=rc.geometry,
+            dynamic=rc.dynamic,
+        )
+    raise AssertionError(f"validated unknown raycasting backend: {rc.backend}")

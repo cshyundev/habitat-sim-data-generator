@@ -42,7 +42,7 @@ class _FakeRaycaster:
 
 class _NoCastRaySim:
     def cast_ray(self, *args, **kwargs):
-        raise AssertionError("Laser2D must use RayCaster.cast_rays(), not sim.cast_ray().")
+        raise AssertionError("Laser2D must use Scene.cast_rays(), not sim.cast_ray().")
 
 
 def _tf_manager():
@@ -88,7 +88,7 @@ class TestIdealLaser2D(unittest.TestCase):
                 "azimuth_bins": 5,
             },
             tf_manager=_tf_manager(),
-            raycaster=raycaster,
+            scene=raycaster,
             output_names=["laser_scan"],
         )
 
@@ -118,7 +118,7 @@ class TestIdealLaser2D(unittest.TestCase):
                 "azimuth_bins": 3,
             },
             tf_manager=_tf_manager(),
-            raycaster=_FakeRaycaster(),
+            scene=_FakeRaycaster(),
             output_names=["laser_scan"],
         )
         points = laser.to_point_cloud(np.array([1.0, np.inf, 2.0], dtype=np.float32))

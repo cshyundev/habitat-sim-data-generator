@@ -2,13 +2,13 @@ import math
 import numpy as np
 import magnum as mn
 import habitat_sim
-from typing import Any, Optional, Dict, List
+from typing import Any, Optional, Dict
 
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.motion_state import MotionState
-from src.datatypes.bbox import Detection2D
-from src.detections.categories import build_category_names, name_for
-from src.detections.obb import global_obbs, obb_to_camera
+from src.detections.obb import global_obbs
+from src.detections.bbox2d import boxes_from_maps
+from src.detections.bbox3d import obbs_for_visible
 from src.sensors.camera.models import (
     Camera,
     PerspectiveCamera,
@@ -73,7 +73,7 @@ class CameraSensor(BaseSensor):
         hz: int,
         parameters: dict,
         tf_manager: Any,
-        raycaster: Any = None,
+        scene: Any = None,
         config: Optional[dict] = None,
         output_names: Optional[list] = None,
         output_params: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -85,7 +85,7 @@ class CameraSensor(BaseSensor):
             hz=hz,
             parameters=parameters,
             tf_manager=tf_manager,
-            raycaster=raycaster,
+            scene=scene,
             config=config,
             output_names=output_names,
             output_params=output_params,
@@ -147,7 +147,9 @@ class CameraSensor(BaseSensor):
             self.src_cam = EquirectangularCamera.from_image_size(
                 [self.render_width, self.render_height]
             )
-        self._categories = None
+        # Detection context is read from the shared Scene (self.scene.categories /
+        # .model), populated when the Scene is bound to the sim. Per-instance world
+        # OBBs are memoized here on first bbox3d use.
         self._world_obbs = None
 
     @classmethod
@@ -411,8 +413,8 @@ class CameraSensor(BaseSensor):
 
     def _cast(self, sim: habitat_sim.Simulator, motion_state: MotionState):
         """Ray-cast the scene from this camera. Returns ``(RaycastResult, hit_mask[H*W])``."""
-        if self.raycaster is None:
-            raise RuntimeError("Camera raycast outputs require a RayCaster; no sim.cast_ray fallback is created.")
+        if self.scene is None:
+            raise RuntimeError("Camera raycast outputs require a Scene; no sim.cast_ray fallback is created.")
 
         sensor_pos_global, q_sensor_global_xyzw = self.world_pose(motion_state)
 
@@ -423,9 +425,9 @@ class CameraSensor(BaseSensor):
         if np.any(invalid):
             dirs[invalid] = (0.0, 0.0, -1.0)
 
-        self.raycaster.bind(sim)  # idempotent; ensures the backend is ready
+        self.scene.bind(sim)  # idempotent; ensures the backend is ready
         origins = np.broadcast_to(sensor_pos_global, dirs.shape)
-        res = self.raycaster.cast_rays(
+        res = self.scene.cast_rays(
             origins, dirs,
             min_distance=self.min_distance,
             max_distance=self.max_distance,
@@ -440,39 +442,28 @@ class CameraSensor(BaseSensor):
         return obj, sem
 
     def _ensure_detection_context(self, sim: habitat_sim.Simulator) -> None:
-        if self._categories is None:
-            self._categories = build_category_names(sim)
-        if self._world_obbs is None and self._has_output("bbox3d"):
-            from src.raycasting import extract_scene_model
-            from src.runtime_config import RaycastingConfig
-
-            geometry = RaycastingConfig.from_config(self.config).geometry
-            scene_model = extract_scene_model(sim, geometry)
-            self._world_obbs = global_obbs(scene_model, self._categories)
-
-    def _bbox2d_from_maps(self, obj: np.ndarray, sem: np.ndarray) -> List[Detection2D]:
-        det2d_cfg = self.modality_params.get("bbox2d", {})
-        min_box_px = int(det2d_cfg.get("min_box_px", self.parameters.get("min_box_px", 8)))
-        dets: List[Detection2D] = []
-        for oid in np.unique(obj):
-            oid = int(oid)
-            if oid == 0:
-                continue
-            ys, xs = np.where(obj == oid)
-            x1, x2 = int(xs.min()), int(xs.max())
-            y1, y2 = int(ys.min()), int(ys.max())
-            if min(x2 - x1 + 1, y2 - y1 + 1) < min_box_px:
-                continue
-            class_id = int(np.bincount(sem[ys, xs].astype(np.int64)).argmax())
-            dets.append(
-                Detection2D(
-                    instance_id=oid,
-                    class_id=class_id,
-                    class_name=name_for(self._categories or {}, class_id),
-                    xyxy=(x1, y1, x2, y2),
-                )
+        categories = self.scene.categories
+        if categories is None:
+            raise RuntimeError(
+                f"Camera '{self.name}' produces detections but the shared Scene "
+                "has no category table; it must be bound to the sim (e.g. by "
+                "create_simulator) before capture."
             )
-        return dets
+        if self._world_obbs is None and self._has_output("bbox3d"):
+            # Reuse the SceneModel the Scene already built in bind() (item 5);
+            # only extract from scratch for backends that hold no model (e.g. sim).
+            scene_model = self.scene.model
+            if scene_model is None:
+                from src.raycasting import extract_scene_model
+                from src.runtime_config import RaycastingConfig
+
+                geometry = RaycastingConfig.from_config(self.config).geometry
+                scene_model = extract_scene_model(sim, geometry)
+            self._world_obbs = global_obbs(scene_model, categories)
+
+    def _bbox2d_min_box_px(self) -> int:
+        det2d_cfg = self.modality_params.get("bbox2d", {})
+        return int(det2d_cfg.get("min_box_px", self.parameters.get("min_box_px", 8)))
 
     def _observe_raycast(
         self, sim: habitat_sim.Simulator, motion_state: MotionState
@@ -517,19 +508,17 @@ class CameraSensor(BaseSensor):
             if obj is None:
                 obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(H, W)
             self._ensure_detection_context(sim)
-            outputs["bbox2d"] = self._bbox2d_from_maps(obj, sem)
+            outputs["bbox2d"] = boxes_from_maps(
+                obj, sem, self.scene.categories, self._bbox2d_min_box_px()
+            )
 
         if self._has_output("bbox3d"):
             if obj is None:
                 obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(H, W)
             self._ensure_detection_context(sim)
-            visible = [int(o) for o in np.unique(obj) if int(o) != 0]
             cam_pos, cam_quat = self.world_pose(motion_state)
-            world = [
-                self._world_obbs[o] for o in visible
-                if self._world_obbs is not None and o in self._world_obbs
-            ]
-            camera = [obb_to_camera(w, cam_pos, cam_quat) for w in world]
-            outputs["bbox3d"] = {"camera": camera, "world": world}
+            outputs["bbox3d"] = obbs_for_visible(
+                obj, self._world_obbs, cam_pos, cam_quat
+            )
 
         return outputs

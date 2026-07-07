@@ -50,11 +50,11 @@ class TestCameraSensor(unittest.TestCase):
             hz=10,
             parameters={"model": "pinhole", "width": 2, "height": 2, "hfov": 90.0},
             tf_manager=_TF(),
-            raycaster=raycaster,
+            scene=raycaster,
             output_names=["rgb", "depth", "semantic", "instance", "bbox2d", "bbox3d"],
             output_params={"bbox2d": {"min_box_px": 1}},
         )
-        cam._categories = {20: "chair"}
+        raycaster.categories = {20: "chair"}
         cam._world_obbs = {
             7: OBB3D(
                 instance_id=7,

@@ -8,15 +8,13 @@ visualization logic -- those live in sinks.
 import logging
 import numpy as np
 import habitat_sim
-from typing import List
+from typing import List, Optional
 
 from src.datatypes.pose import Pose3D
 from src.sensors.suite import SensorSuite
 from src.utils.habitat import pose_to_agent_state
 from src.utils.coords import extract_visual_map_as_markers
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
-from src.detections import build_category_names
-from src.runtime_config import max_duration_ns_from_config
 from src.planners.global_planning import BaseGlobalPlanner
 from src.planners.local_planning import BaseLocalPlanner
 from src.planners.registry import create_global_planner, create_local_planner
@@ -46,6 +44,7 @@ class StreamingPipeline:
         local_planner: BaseLocalPlanner,
         scene_markers: List[dict],
         category_names=None,
+        max_duration_ns: Optional[int] = None,
     ):
         self.config = config
         self.sim = sim
@@ -56,6 +55,8 @@ class StreamingPipeline:
         self.scene_markers = scene_markers
         self.duration_ns = 0
         self.category_names = category_names or {}
+        # Validated once at the entry point (RuntimeConfig); no dict re-parse here.
+        self.max_duration_ns = max_duration_ns
 
     def _plan_trajectory(self) -> None:
         """Runs the configured global planner and seeds the local planner."""
@@ -69,9 +70,8 @@ class StreamingPipeline:
         self.local_planner.set_waypoints(waypoints, start_pose=start_pose)
 
         duration_ns = self.local_planner.duration_ns
-        max_duration_ns = max_duration_ns_from_config(self.config)
-        if max_duration_ns is not None:
-            duration_ns = min(duration_ns, max_duration_ns)
+        if self.max_duration_ns is not None:
+            duration_ns = min(duration_ns, self.max_duration_ns)
         self.duration_ns = duration_ns
 
     def run(self, sinks: List[StreamSink]) -> int:
@@ -133,10 +133,15 @@ def build_pipeline(
     config: dict,
     sim: habitat_sim.Simulator,
     sensor_suite: SensorSuite,
+    max_duration_ns: Optional[int] = None,
 ) -> StreamingPipeline:
     """
     Wires configured planners, scene context, and detector jobs into a ready-to-run
     StreamingPipeline.
+
+    Args:
+        max_duration_ns: Optional trajectory cap (already validated by
+            ``RuntimeConfig`` at the entry point); the pipeline does not re-parse it.
 
     Raises:
         RuntimeError: if the global planner produced no waypoints.
@@ -145,7 +150,10 @@ def build_pipeline(
     local_planner = create_local_planner(config)
 
     scene_markers = extract_visual_map_as_markers(sim, config)
-    categories = build_category_names(sim)
+    # The category table is owned by the shared Scene (built once when it was
+    # bound to the sim); read it here for the MCAP metadata sidecar. Sensors read
+    # it straight off the Scene, so nothing is injected per sensor.
+    categories = sensor_suite.scene.categories or {}
 
     return StreamingPipeline(
         config=config,
@@ -155,4 +163,5 @@ def build_pipeline(
         local_planner=local_planner,
         scene_markers=scene_markers,
         category_names=categories,
+        max_duration_ns=max_duration_ns,
     )

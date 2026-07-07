@@ -34,4 +34,12 @@ def create_simulator(
     agent_cfg.sensor_specifications = sensor_suite.get_native_sensor_specs()
     
     cfg = habitat_sim.Configuration(sim_cfg, [agent_cfg])
-    return habitat_sim.Simulator(cfg)
+
+    sim = habitat_sim.Simulator(cfg)
+
+    # Bind the shared Scene to the fresh sim once, here: this extracts the
+    # geometry (BVH) and the semantic category table so both are ready before the
+    # first capture (the sidecar and the camera read them). Idempotent -- capture
+    # re-binds harmlessly.
+    sensor_suite.scene.bind(sim)
+    return sim

@@ -22,7 +22,7 @@ class IdealLaser2D(Laser2D):
         hz: int,
         parameters: dict,
         tf_manager: Any,
-        raycaster: Any = None,
+        scene: Any = None,
         config: Optional[dict] = None,
         output_names: Optional[list] = None,
         output_params: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -34,7 +34,7 @@ class IdealLaser2D(Laser2D):
             hz=hz,
             parameters=parameters,
             tf_manager=tf_manager,
-            raycaster=raycaster,
+            scene=scene,
             config=config,
             output_names=output_names,
             output_params=output_params,
@@ -68,8 +68,8 @@ class IdealLaser2D(Laser2D):
         motion_state: MotionState,
         tf_manager: Any,
     ) -> Dict[str, Any]:
-        if self.raycaster is None:
-            raise RuntimeError("Laser2D requires a RayCaster; no sim.cast_ray fallback is created.")
+        if self.scene is None:
+            raise RuntimeError("Laser2D requires a Scene; no sim.cast_ray fallback is created.")
 
         agent_pos = np.asarray(motion_state.position, dtype=np.float64)
         q_agent_xyzw = np.asarray(motion_state.orientation, dtype=np.float64)
@@ -86,8 +86,8 @@ class IdealLaser2D(Laser2D):
         ).astype(np.float32)
         origins = np.broadcast_to(sensor_pos_global, directions_global.shape)
 
-        self.raycaster.bind(sim)
-        res = self.raycaster.cast_rays(
+        self.scene.bind(sim)
+        res = self.scene.cast_rays(
             origins,
             directions_global,
             min_distance=self.min_distance,
