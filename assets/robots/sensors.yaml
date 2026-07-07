@@ -1,5 +1,5 @@
 # Sensor generation spec. Each sensor is keyed by the URDF link it is mounted to.
-# Export topics/schemas live under mcap_export.channels.
+# Export topics/schemas live under mcap_export.sensor_channels.
 sensors:
   - link: lidar_link
     type: lidar3d

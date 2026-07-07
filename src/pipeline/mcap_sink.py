@@ -97,7 +97,7 @@ def _resolve_sensor_channels(
         except KeyError as exc:
             raise ConfigError(
                 "Missing MCAP sensor channel config for "
-                f"mcap_export.channels.{sensor_name}.{output_name}."
+                f"mcap_export.sensor_channels.{sensor_name}.{output_name}."
             ) from exc
         channels[channel_key] = {
             "topic": channel.topic,

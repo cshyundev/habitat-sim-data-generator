@@ -88,7 +88,7 @@ class McapExportConfig:
         channels: Dict[str, ChannelConfig] = {}
         seen_topics: Dict[str, str] = {}
         sensor_channels: Dict[str, Dict[str, ChannelConfig]] = {}
-        static_channel_names = {
+        pipeline_channel_names = {
             "pose",
             "occupancy_grid",
             "map_3d_marker_array",
@@ -119,28 +119,13 @@ class McapExportConfig:
         for key, val in raw_channels.items():
             channel_key = str(key)
             ctx = f"mcap_export.channels.{channel_key}"
-            if not isinstance(val, dict):
-                raise ConfigError(f"{ctx}: must be a mapping.")
-            if "topic" in val or "schema" in val:
-                if channel_key not in static_channel_names:
-                    raise ConfigError(
-                        f"{ctx}: direct topic/schema channels are reserved for "
-                        f"pipeline channels {sorted(static_channel_names)}. "
-                        "Sensor outputs must be nested by sensor name."
-                    )
-                channels[channel_key] = parse_channel(val, ctx)
-                continue
-            if channel_key in static_channel_names:
-                raise ConfigError(f"{ctx}: missing required keys 'topic' and 'schema'.")
-            if not val:
-                raise ConfigError(f"{ctx}: must be a non-empty output mapping.")
-            sensor_channels[channel_key] = {}
-            for output_name, output_val in val.items():
-                output_key = str(output_name).lower()
-                out_ctx = f"{ctx}.{output_key}"
-                sensor_channels[channel_key][output_key] = parse_channel(
-                    output_val, out_ctx
+            if channel_key not in pipeline_channel_names:
+                raise ConfigError(
+                    f"{ctx}: unknown pipeline channel. "
+                    f"Expected one of {sorted(pipeline_channel_names)}. "
+                    "Sensor outputs must live under mcap_export.sensor_channels."
                 )
+            channels[channel_key] = parse_channel(val, ctx)
 
         for sensor_name, outputs in raw_sensor_channels.items():
             sensor_key = str(sensor_name)
@@ -149,14 +134,10 @@ class McapExportConfig:
                     f"mcap_export.sensor_channels.{sensor_key}: "
                     "must be a non-empty mapping."
                 )
-            sensor_channels.setdefault(sensor_key, {})
+            sensor_channels[sensor_key] = {}
             for output_name, val in outputs.items():
                 output_key = str(output_name).lower()
                 ctx = f"mcap_export.sensor_channels.{sensor_key}.{output_key}"
-                if output_key in sensor_channels[sensor_key]:
-                    raise ConfigError(
-                        f"{ctx}: channel already defined in mcap_export.channels."
-                    )
                 sensor_channels[sensor_key][output_key] = parse_channel(
                     val, ctx
                 )

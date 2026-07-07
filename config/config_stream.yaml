@@ -49,6 +49,22 @@ mcap_export:
   output_filename: "trajectory_stream.mcap"
   export_map: true
   channels:
+    pose:
+      topic: "/pose"
+      schema: "geometry_msgs/msg/PoseStamped"
+    occupancy_grid:
+      topic: "/map"
+      schema: "nav_msgs/msg/OccupancyGrid"
+    map_3d_marker_array:
+      topic: "/map_3d"
+      schema: "visualization_msgs/msg/MarkerArray"
+    tf_static:
+      topic: "/tf_static"
+      schema: "tf2_msgs/msg/TFMessage"
+    tf_dynamic:
+      topic: "/tf"
+      schema: "tf2_msgs/msg/TFMessage"
+  sensor_channels:
     lidar_link:
       point_cloud:
         topic: /lidar
@@ -76,18 +92,3 @@ mcap_export:
       imu:
         topic: /imu
         schema: sensor_msgs/msg/Imu
-    pose:
-      topic: "/pose"
-      schema: "geometry_msgs/msg/PoseStamped"
-    occupancy_grid:
-      topic: "/map"
-      schema: "nav_msgs/msg/OccupancyGrid"
-    map_3d_marker_array:
-      topic: "/map_3d"
-      schema: "visualization_msgs/msg/MarkerArray"
-    tf_static:
-      topic: "/tf_static"
-      schema: "tf2_msgs/msg/TFMessage"
-    tf_dynamic:
-      topic: "/tf"
-      schema: "tf2_msgs/msg/TFMessage"

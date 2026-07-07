@@ -59,14 +59,16 @@ def _valid_config():
         "mcap_export": {
             "output_filename": "out.mcap",
             "channels": {
+                "pose": {"topic": "/pose", "schema": "geometry_msgs/msg/PoseStamped"},
+            },
+            "sensor_channels": {
                 "camera_link": {
                     "rgb": {
                         "topic": "/camera/front/rgb",
                         "schema": "sensor_msgs/msg/Image",
                     },
                 },
-                "pose": {"topic": "/pose", "schema": "geometry_msgs/msg/PoseStamped"},
-            }
+            },
         },
     }
 
@@ -150,7 +152,7 @@ class TestRuntimeConfigValidation(unittest.TestCase):
                 "mcap_export": {"channels": {"pose": {"topic": "/pose"}}}
             })
 
-    def test_mcap_sensor_channel_requires_nested_mapping(self):
+    def test_mcap_channels_reject_sensor_channel_name(self):
         with self.assertRaises(ConfigError):
             McapExportConfig.from_config({
                 "mcap_export": {
@@ -163,23 +165,20 @@ class TestRuntimeConfigValidation(unittest.TestCase):
                 }
             })
 
-    def test_mcap_nested_sensor_channels_parse(self):
-        cfg = McapExportConfig.from_config({
-            "mcap_export": {
-                "channels": {
-                    "camera_front": {
-                        "rgb": {
-                            "topic": "/camera/front/rgb",
-                            "schema": "sensor_msgs/msg/Image",
+    def test_mcap_channels_reject_nested_sensor_channels(self):
+        with self.assertRaises(ConfigError):
+            McapExportConfig.from_config({
+                "mcap_export": {
+                    "channels": {
+                        "camera_front": {
+                            "rgb": {
+                                "topic": "/camera/front/rgb",
+                                "schema": "sensor_msgs/msg/Image",
+                            }
                         }
                     }
                 }
-            }
-        })
-        self.assertEqual(
-            cfg.sensor_channels["camera_front"]["rgb"].topic,
-            "/camera/front/rgb",
-        )
+            })
 
     def test_mcap_sensor_channels_parse(self):
         cfg = McapExportConfig.from_config({

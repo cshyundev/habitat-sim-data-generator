@@ -268,7 +268,7 @@ class TestMcapSinkMapExport(unittest.TestCase):
             path = os.path.join(td, "sample.mcap")
             sink = McapSink(path, McapExportConfig.from_config({
                 "mcap_export": {
-                    "channels": {
+                    "sensor_channels": {
                         "cam": {
                             "rgb": {
                                 "topic": "/cam/rgb",

@@ -166,7 +166,9 @@ def _load_sensor_specs(
         if "parent_link" in s:
             raise ConfigError(f"{ctx}: frame attachment must be declared as sensor.link.")
         if "topic" in s or "schema" in s:
-            raise ConfigError(f"{ctx}: export channels must live under mcap_export.channels.")
+            raise ConfigError(
+                f"{ctx}: export channels must live under mcap_export.sensor_channels."
+            )
         if "modality" in parameters:
             raise ConfigError(f"{ctx}: legacy parameters.modality is not supported.")
 
@@ -199,7 +201,7 @@ def _load_sensor_specs(
             if "topic" in output_cfg or "schema" in output_cfg:
                 raise ConfigError(
                     f"{out_ctx}: export channels must live under "
-                    "mcap_export.channels."
+                    "mcap_export.sensor_channels."
                 )
             params = {
                 str(k): v

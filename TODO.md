@@ -170,7 +170,7 @@ sensor. `tests/test_imu_sensor.py` supplies a real (identity) `TFManager` via a
 
 ## P4 — Config schema and smells
 
-### 14. `McapExportConfig.from_config` juggles two declaration shapes (~105 lines)
+### 14. `McapExportConfig.from_config` juggles two declaration shapes (~105 lines) — DONE
 **Where:** `src/runtime_config.py:34-140`.
 **Cause:** sensor channels can be declared nested inside `channels` (detected
 by the absence of a direct `topic` key, guarded by a reserved static-name set)
