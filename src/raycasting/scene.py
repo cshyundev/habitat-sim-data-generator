@@ -54,6 +54,7 @@ class ObjectMesh:
 
     @property
     def num_triangles(self) -> int:
+        """Number of triangles in this local mesh."""
         return int(self.local_verts.shape[0])
 
 
@@ -87,14 +88,17 @@ class SceneModel:
 
     @property
     def num_instances(self) -> int:
+        """Number of object instances in the scene."""
         return len(self.objects)
 
     @property
     def num_triangles(self) -> int:
+        """Total number of triangles across all instances."""
         return int(sum(o.num_triangles for o in self.objects))
 
     @property
     def num_unique_meshes(self) -> int:
+        """Number of unique mesh keys used by the scene."""
         return len({o.mesh_key for o in self.objects})
 
     def index_of(self, object_id: int) -> int:

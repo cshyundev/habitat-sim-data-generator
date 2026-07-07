@@ -31,7 +31,7 @@ from __future__ import annotations
 import os
 import logging
 import xml.etree.ElementTree as ET
-from typing import Dict, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import trimesh
@@ -84,7 +84,7 @@ def _apply_transform(tris: np.ndarray, matrix: np.ndarray) -> np.ndarray:
     return out.reshape(tris.shape)
 
 
-def _finalize(local: np.ndarray) -> Optional[tuple]:
+def _finalize(local: np.ndarray) -> Optional[Tuple[np.ndarray, np.ndarray]]:
     """Drop non-finite triangles and return (verts f32, face_normals f32)."""
     finite = np.isfinite(local).all(axis=(1, 2))
     local = local[finite]
@@ -105,7 +105,8 @@ def _asset_path(attrs, geometry: str) -> str:
 # ---------------------------------------------------------------------------
 # URDF parsing (articulated-object link meshes)
 # ---------------------------------------------------------------------------
-def _floats(s: str) -> list:
+def _floats(s: str) -> List[float]:
+    """Parse a whitespace/comma separated float list."""
     return [float(x) for x in s.replace(",", " ").split()]
 
 
@@ -129,9 +130,12 @@ def _urdf_origin(origin_el) -> np.ndarray:
     return m
 
 
-def _parse_urdf_visuals(urdf_path: str) -> dict:
+UrdfVisual = Tuple[str, np.ndarray, np.ndarray]
+
+
+def _parse_urdf_visuals(urdf_path: str) -> Dict[str, List[UrdfVisual]]:
     """Map link name -> list of ``(mesh_abs_path, scale[3], origin_4x4)``."""
-    out: dict = {}
+    out: Dict[str, List[UrdfVisual]] = {}
     if not os.path.exists(urdf_path):
         return out
     base = os.path.dirname(urdf_path)
@@ -141,7 +145,7 @@ def _parse_urdf_visuals(urdf_path: str) -> dict:
         logger.warning("Cannot parse URDF '%s': %s", urdf_path, exc)
         return out
     for link in root.findall("link"):
-        visuals = []
+        visuals: List[UrdfVisual] = []
         for vis in link.findall("visual"):
             mesh = vis.find("geometry/mesh")
             if mesh is None or not mesh.get("filename"):
@@ -163,13 +167,23 @@ class _Builder:
     """Accumulates instances, sharing local meshes by ``mesh_key``."""
 
     def __init__(self) -> None:
+        """Initialize empty extraction buffers and mesh cache."""
         self._mesh_cache: Dict[str, ObjectMesh] = {}
-        self.objects: list = []
-        self.transforms: list = []
-        self.motion: list = []
-        self.object_ids: list = []
+        self.objects: List[ObjectMesh] = []
+        self.transforms: List[np.ndarray] = []
+        self.motion: List[int] = []
+        self.object_ids: List[int] = []
 
-    def add(self, mesh_key, local_loader, transform, object_id, semantic_id, motion):
+    def add(
+        self,
+        mesh_key: str,
+        local_loader: Callable[[], Optional[np.ndarray]],
+        transform: np.ndarray,
+        object_id: int,
+        semantic_id: int,
+        motion: int,
+    ) -> None:
+        """Add one scene instance, loading and caching its local mesh if needed."""
         om = self._mesh_cache.get(mesh_key)
         if om is None:
             local = local_loader()
@@ -221,9 +235,9 @@ def _add_rigid_objects(sim, geometry: str, b: _Builder) -> None:
         )
 
 
-def _link_local_mesh(visuals: list) -> Optional[np.ndarray]:
+def _link_local_mesh(visuals: List[UrdfVisual]) -> Optional[np.ndarray]:
     """Merge a link's URDF visuals into one local-frame triangle array."""
-    parts = []
+    parts: List[np.ndarray] = []
     for mesh_path, scale, origin in visuals:
         tris = _load_triangles(mesh_path)
         if tris is None:
@@ -327,7 +341,7 @@ def read_dynamic_transforms(
     :meth:`RaycastBackend.update_transforms`.
     """
     # Build object_id -> (transform, awake) from the live sim.
-    live: Dict[int, tuple] = {}
+    live: Dict[int, Tuple[np.ndarray, bool]] = {}
     rom = sim.get_rigid_object_manager()
     for handle in rom.get_object_handles():
         o = rom.get_object_by_handle(handle)

@@ -34,10 +34,12 @@ class OccupancyGrid2D:
 
     @property
     def width(self) -> int:
+        """Grid width in cells."""
         return self.data.shape[1]
 
     @property
     def height(self) -> int:
+        """Grid height in cells."""
         return self.data.shape[0]
 
     def save(self, yaml_path: str, png_path: str):

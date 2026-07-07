@@ -37,7 +37,12 @@ class Scene:
     then :meth:`cast_rays` per sensor.
     """
 
-    def __init__(self, raycasting: RaycastingConfig):
+    def __init__(self, raycasting: RaycastingConfig) -> None:
+        """Create a scene wrapper with the configured ray-casting backend.
+
+        Args:
+            raycasting: Parsed ray-casting configuration.
+        """
         self._backend = build_backend(raycasting)
         self._geometry = raycasting.geometry
         self._categories: Optional[Dict[int, str]] = None

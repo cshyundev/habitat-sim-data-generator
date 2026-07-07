@@ -19,32 +19,53 @@ from src.datatypes.map import OccupancyGrid2D, GRID_2D_FREE
 
 
 class Interval:
-    def __init__(self, index: int, start: int, end: int):
+    """Contiguous free interval along one sweep line."""
+
+    def __init__(self, index: int, start: int, end: int) -> None:
+        """Initialize an interval.
+
+        Args:
+            index: Sweep-line index.
+            start: Inclusive start coordinate on the orthogonal axis.
+            end: Inclusive end coordinate on the orthogonal axis.
+        """
         self.index = index  # row index (if horizontal) or col index (if vertical)
         self.start = start  # start coordinate along the other axis
         self.end = end      # end coordinate along the other axis
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Return a debug representation."""
         return f"Interval(idx={self.index}, start={self.start}, end={self.end})"
 
     def overlaps(self, other: 'Interval') -> bool:
+        """Return whether this interval overlaps another interval."""
         return max(self.start, other.start) <= min(self.end, other.end)
 
 
 class MonotoneCell:
-    def __init__(self, direction: str):
+    """Group of connected intervals forming one monotone cell."""
+
+    def __init__(self, direction: str) -> None:
+        """Initialize an empty monotone cell.
+
+        Args:
+            direction: Sweep direction, ``"horizontal"`` or ``"vertical"``.
+        """
         self.direction = direction  # "horizontal" or "vertical"
         self.intervals: List[Interval] = []
 
-    def add_interval(self, interval: Interval):
+    def add_interval(self, interval: Interval) -> None:
+        """Append an interval to this cell."""
         self.intervals.append(interval)
 
     @property
     def min_idx(self) -> int:
+        """Minimum sweep-line index in this cell."""
         return min(i.index for i in self.intervals)
 
     @property
     def max_idx(self) -> int:
+        """Maximum sweep-line index in this cell."""
         return max(i.index for i in self.intervals)
 
 

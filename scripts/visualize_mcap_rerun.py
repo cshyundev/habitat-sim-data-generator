@@ -7,6 +7,7 @@ other ROS 2 / Foxglove tool would decode from the same file.
 """
 import os
 import sys
+from typing import List, Sequence
 
 import numpy as np
 import rerun as rr
@@ -16,14 +17,23 @@ from mcap_ros2.decoder import DecoderFactory
 
 
 def _vec3(v) -> np.ndarray:
+    """Convert a ROS vector-like object to a float32 xyz array."""
     return np.array([v.x, v.y, v.z], dtype=np.float32)
 
 
 def _quat_xyzw(q) -> np.ndarray:
+    """Convert a ROS quaternion-like object to xyzw float32 order."""
     return np.array([q.x, q.y, q.z, q.w], dtype=np.float32)
 
 
-def log_coordinate_axes(entity_path, length=0.3, radius=0.01):
+def log_coordinate_axes(entity_path: str, length: float = 0.3, radius: float = 0.01) -> None:
+    """Log static coordinate axes in Rerun.
+
+    Args:
+        entity_path: Rerun entity path.
+        length: Axis length.
+        radius: Arrow radius.
+    """
     rr.log(
         entity_path,
         rr.Arrows3D(
@@ -37,6 +47,7 @@ def log_coordinate_axes(entity_path, length=0.3, radius=0.01):
 
 
 def _log_map_3d(markers) -> None:
+    """Log static map markers as Rerun meshes."""
     print(f"   - [/map_3d] 로깅 완료 (마커 개수: {len(markers)} 개)")
     for m in markers:
         entity_path = f"world/map_3d/{m.ns}_{m.id}"
@@ -56,7 +67,8 @@ def _log_map_3d(markers) -> None:
         ))
 
 
-def _log_pose(ros_msg, trajectory_pts: list) -> None:
+def _log_pose(ros_msg, trajectory_pts: List[Sequence[float]]) -> None:
+    """Log robot pose and append it to the trajectory line strip."""
     p = ros_msg.pose.position
     q = ros_msg.pose.orientation
     rr.log("world/robot", rr.Transform3D(
@@ -68,6 +80,7 @@ def _log_pose(ros_msg, trajectory_pts: list) -> None:
 
 
 def _log_tf(ros_msg) -> None:
+    """Log supported transforms from TF messages."""
     for t in ros_msg.transforms:
         parent = t.header.frame_id
         child = t.child_frame_id
@@ -113,6 +126,7 @@ def _log_point_cloud(ros_msg) -> None:
 
 
 def _log_laser_scan(ros_msg) -> None:
+    """Decode and log a planar laser scan as 3D points."""
     ranges = np.asarray(ros_msg.ranges, dtype=np.float32)
     angles = ros_msg.angle_min + np.arange(len(ranges)) * ros_msg.angle_increment
     valid = np.isfinite(ranges) & (ranges >= ros_msg.range_min) & (ranges <= ros_msg.range_max)
@@ -123,6 +137,7 @@ def _log_laser_scan(ros_msg) -> None:
 
 
 def _log_detections2d(ros_msg) -> None:
+    """Log 2D detections decoded from MCAP."""
     dets = ros_msg.detections
     boxes = [list(d.xyxy) for d in dets]
     labels = [f"{d.instance_id}:{d.class_name}" for d in dets]
@@ -134,6 +149,7 @@ def _log_detections2d(ros_msg) -> None:
 
 
 def _log_detections3d(ros_msg) -> None:
+    """Log 3D detections decoded from MCAP."""
     dets = ros_msg.detections
     if not dets:
         return
@@ -148,6 +164,7 @@ def _log_detections3d(ros_msg) -> None:
 
 
 def _log_image(ros_msg, topic: str) -> None:
+    """Decode and log a sensor_msgs/Image payload."""
     height, width, encoding = ros_msg.height, ros_msg.width, ros_msg.encoding.lower()
     raw = ros_msg.data
     if encoding in ("rgb8", "mono8"):
@@ -172,7 +189,8 @@ def _log_image(ros_msg, topic: str) -> None:
         rr.log(entity_path, rr.SegmentationImage(img.astype(np.uint16)))
 
 
-def main():
+def main() -> None:
+    """Replay a configured MCAP file into a live Rerun viewer."""
     print("==================================================")
     print("1. config_stream.yaml 설정 불러오기...")
     with open("config_stream.yaml", "r") as f:
@@ -191,7 +209,7 @@ def main():
     log_coordinate_axes("world/robot/axes", length=0.3, radius=0.01)
     log_coordinate_axes("world/robot/lidar/axes", length=0.2, radius=0.007)
 
-    trajectory_pts = []
+    trajectory_pts: List[Sequence[float]] = []
 
     with open(mcap_path, "rb") as mcap_f:
         reader = make_reader(mcap_f, decoder_factories=[DecoderFactory()])

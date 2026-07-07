@@ -1,6 +1,6 @@
 import numpy as np
 import habitat_sim
-from typing import Any, Optional, Dict
+from typing import Dict, Optional
 
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.motion_state import MotionState
@@ -20,7 +20,8 @@ class IdealIMU(BaseSensor):
     patch. Values remain in Habitat axes until export, where the final
     Habitat-to-ROS basis conversion happens.
     """
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
+        """Initialize the ideal IMU from common sensor config fields."""
         # IMU does not ray-cast; ``scene`` (forwarded via kwargs) is accepted
         # only for a uniform sensor constructor signature.
         super().__init__(**kwargs)
@@ -34,27 +35,35 @@ class IdealIMU(BaseSensor):
         self.gravity_mps2 = float(self.parameters.get("gravity_mps2", 9.80665))
 
     @classmethod
-    def validate_outputs(cls, outputs: Dict[str, Any]) -> None:
+    def validate_outputs(cls, outputs: Dict[str, object]) -> None:
+        """Validate the IMU output mapping from sensor config."""
         if set(outputs) != {"imu"}:
             raise ValueError("imu sensors must define exactly one output named 'imu'.")
 
     def is_native(self) -> bool:
+        """Return whether this sensor is backed by a native Habitat sensor."""
         return False
 
     def get_sensor_spec(self) -> Optional[habitat_sim.SensorSpec]:
+        """Return no Habitat SensorSpec because the IMU is custom-simulated."""
         return None
 
     def get_observation(
         self,
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-    ):
-        """
-        Returns gyroscope and accelerometer readings in the IMU sensor frame.
+    ) -> Dict[str, object]:
+        """Return gyroscope and accelerometer readings in the IMU frame.
+
+        Args:
+            sim: Habitat simulator instance. Unused by the ideal IMU.
+            motion_state: Robot state carrying body-frame angular velocity and
+                linear acceleration.
 
         Returns:
-            Imu with angular velocity [rad/s] and linear acceleration
-            [m/s^2] in this IMU frame.
+            Mapping ``{"imu": Imu(...)}``, where angular velocity is in
+            radians per second and linear acceleration is in meters per second
+            squared in this IMU frame.
         """
         omega_base = np.asarray(motion_state.angular_velocity_body, dtype=np.float64)
         accel_base = np.asarray(motion_state.linear_acceleration_body, dtype=np.float64)

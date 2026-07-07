@@ -22,7 +22,7 @@ import os
 import sys
 import math
 import argparse
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import yaml
@@ -44,10 +44,19 @@ from src.planners.map_converter import generate_occupancy_grid_from_sim
 # ==========================================================================
 def plan_poses(
     occ_grid: OccupancyGrid2D,
-    config: dict,
+    config: Dict[str, object],
     dt_ns: int = 50_000_000,
 ) -> Tuple[List[Pose3D], List[np.ndarray]]:
-    """Returns (dense poses for the robot, coarse waypoint positions)."""
+    """Plan dense poses and coarse waypoint positions.
+
+    Args:
+        occ_grid: Occupancy grid used by the global planner.
+        config: Raw runtime config loaded from YAML.
+        dt_ns: Local-trajectory sample period.
+
+    Returns:
+        Pair of dense robot poses and coarse waypoint positions.
+    """
     from src.planners.global_planning import ZigzagCoveragePlanner, ZigzagCoverageParams
     from src.planners.local_planning import DifferentialDriveLocalPlanner, DifferentialDriveParams
 
@@ -79,8 +88,19 @@ def animate(occ_grid: OccupancyGrid2D, poses: List[Pose3D],
             waypoint_positions: List[np.ndarray],
             robot_radius_m: float = 0.15, dt_ns: int = 50_000_000,
             speed: float = 1.0, max_frames: int = 1500,
-            save_path: str = None):
-    """Live matplotlib animation of the robot driving along `poses`."""
+            save_path: Optional[str] = None) -> None:
+    """Render a live or saved matplotlib animation of the path.
+
+    Args:
+        occ_grid: Occupancy grid background.
+        poses: Dense robot poses to animate.
+        waypoint_positions: Coarse waypoint positions to overlay.
+        robot_radius_m: Robot radius in metres.
+        dt_ns: Pose sampling interval in nanoseconds.
+        speed: Playback speed multiplier.
+        max_frames: Maximum number of displayed frames.
+        save_path: Optional GIF output path.
+    """
     if not poses:
         raise ValueError("No poses to animate.")
 
@@ -120,7 +140,8 @@ def animate(occ_grid: OccupancyGrid2D, poses: List[Pose3D],
     ax.add_patch(robot)
     (heading,) = ax.plot([], [], "-", color="#ffd500", lw=3, zorder=6)
 
-    def update(i):
+    def update(i: int):
+        """Update one animation frame."""
         idx = idxs[i]
         cx, cy = path_px[idx]
         robot.center = (cx, cy)
@@ -147,8 +168,15 @@ def animate(occ_grid: OccupancyGrid2D, poses: List[Pose3D],
 # ==========================================================================
 # FIXED: occupancy-grid sources.
 # ==========================================================================
-def build_occ_from_sim(config: dict) -> OccupancyGrid2D:
-    """Loads the simulator from config and converts it to an occupancy grid."""
+def build_occ_from_sim(config: Dict[str, object]) -> OccupancyGrid2D:
+    """Load the simulator from config and convert it to an occupancy grid.
+
+    Args:
+        config: Raw runtime config loaded from YAML.
+
+    Returns:
+        Generated occupancy grid.
+    """
     from src.robot_config import load_robot
     from src.runtime_config import RaycastingConfig
     from src.sensors.suite import SensorSuite
@@ -171,7 +199,14 @@ def build_occ_from_sim(config: dict) -> OccupancyGrid2D:
 
 
 def build_synthetic_occ(resolution: float = 0.05) -> OccupancyGrid2D:
-    """A synthetic room (walls + an interior obstacle) for sim-free preview."""
+    """Build a synthetic room grid for simulator-free preview.
+
+    Args:
+        resolution: Cell size in metres.
+
+    Returns:
+        Occupancy grid with walls and an interior obstacle.
+    """
     n = int(round(6.0 / resolution)) + 8
     data = np.full((n, n), GRID_2D_OCCUPIED, dtype=np.uint8)
     data[4:n - 4, 4:n - 4] = GRID_2D_FREE
@@ -184,7 +219,8 @@ def build_synthetic_occ(resolution: float = 0.05) -> OccupancyGrid2D:
     return OccupancyGrid2D(data=data, resolution=resolution, origin=origin)
 
 
-def main():
+def main() -> None:
+    """Run the CLI animation preview."""
     parser = argparse.ArgumentParser(description="Live 2D occ-grid path animation.")
     parser.add_argument("--config", default="config_stream.yaml")
     parser.add_argument("--synthetic", action="store_true",

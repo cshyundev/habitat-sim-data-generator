@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+from typing import Optional
 
 import numpy as np
 import yaml
@@ -38,18 +39,20 @@ _CORNER_SIGNS = np.array([[sx, sy, sz] for sx in (-1, 1) for sy in (-1, 1) for s
 _EDGES = [(i, i ^ b) for i in range(8) for b in (1, 2, 4) if i < (i ^ b)]
 
 
-def _motion_state(pos, yaw_deg):
+def _motion_state(pos: np.ndarray, yaw_deg: float) -> MotionState:
+    """Create a stationary motion state at a yaw angle."""
     return MotionState(pos, yaw_to_quaternion(math.radians(yaw_deg)), 0, np.zeros(3), np.zeros(3), np.zeros(3))
 
 
-def _find(suite, name=None, modality=None):
+def _find(suite: SensorSuite, name: Optional[str] = None, modality: Optional[str] = None):
+    """Find a sensor by name or modality."""
     for s in suite.sensors:
         if (name and s.name == name) or (modality and getattr(s, "modality", None) == modality):
             return s
     return None
 
 
-def _color_map(id_map):
+def _color_map(id_map: np.ndarray) -> np.ndarray:
     """Colorize an integer id map with a stable per-id random color (0 -> black)."""
     out = np.zeros((*id_map.shape, 3), np.uint8)
     for v in np.unique(id_map):
@@ -71,7 +74,8 @@ def _project_obb(cam, obb):
     return np.asarray(px).T, cv[:, 2] > 1e-3
 
 
-def main():
+def main() -> None:
+    """Render a static four-panel bounding-box visualization."""
     ap = argparse.ArgumentParser()
     ap.add_argument("config", nargs="?", default="config_stream.yaml")
     ap.add_argument("--out", default="bbox_viz.png")

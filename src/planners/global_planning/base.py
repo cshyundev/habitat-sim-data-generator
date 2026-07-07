@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 import habitat_sim
 
 from src.datatypes.waypoint import Waypoint
@@ -11,7 +11,7 @@ class PlanningResult:
     """Global-planner output plus optional artifacts for sinks/exporters."""
 
     waypoints: List[Waypoint]
-    artifacts: dict = field(default_factory=dict)
+    artifacts: Dict[str, object] = field(default_factory=dict)
 
 
 class BaseGlobalPlanner(ABC):

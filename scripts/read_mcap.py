@@ -1,8 +1,12 @@
 import os
+from typing import Dict, Optional
+
 import yaml
 from mcap.reader import make_reader
 
-def main():
+
+def main() -> None:
+    """Print topic and timing statistics for the configured MCAP file."""
     print("==================================================")
     print("1. config_stream.yaml 설정 불러오기...")
     with open("config_stream.yaml", "r") as f:
@@ -16,10 +20,10 @@ def main():
     print(f"2. MCAP 파일 분석 시작 ({mcap_path})...")
     
     # Track statistics
-    topic_counts = {}
-    topic_schema_name = {}
-    first_log_time = None
-    last_log_time = None
+    topic_counts: Dict[str, int] = {}
+    topic_schema_name: Dict[str, str] = {}
+    first_log_time: Optional[int] = None
+    last_log_time: Optional[int] = None
     
     with open(mcap_path, "rb") as f:
         reader = make_reader(f)

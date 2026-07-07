@@ -166,7 +166,7 @@ sensor. `tests/test_imu_sensor.py` supplies a real (identity) `TFManager` via a
 - `config_stream.yaml` raycasting comment says `sim | gpu` but code accepts
   `mlx` too (`runtime_config.py:194`).
 - `src/pipeline/mcap_sink.py:162` stray draft comment (`# 방식1: ...`) and the
-  missing blank line before `on_finish` (line 175).
+  missing blank line before `on_finish` (line 175). — DONE
 
 ## P4 — Config schema and smells
 

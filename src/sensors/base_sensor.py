@@ -1,8 +1,12 @@
 import abc
-from typing import Optional, Dict, Any
+from typing import Dict, List, Optional, TYPE_CHECKING
 import habitat_sim
 
 from src.datatypes.motion_state import MotionState
+from src.utils.tf import TFManager
+
+if TYPE_CHECKING:
+    from src.scene import Scene
 
 class BaseSensor(abc.ABC):
     """
@@ -15,11 +19,11 @@ class BaseSensor(abc.ABC):
         sensor_type: str,
         parent_link: str,
         hz: int,
-        parameters: Dict[str, Any],
-        tf_manager: Any,
-        scene: Any = None,
-        output_names: Optional[list] = None,
-        output_params: Optional[Dict[str, Dict[str, Any]]] = None,
+        parameters: Dict[str, object],
+        tf_manager: TFManager,
+        scene: Optional["Scene"] = None,
+        output_names: Optional[List[str]] = None,
+        output_params: Optional[Dict[str, Dict[str, object]]] = None,
     ):
         """
         Initialize the sensor.
@@ -46,12 +50,12 @@ class BaseSensor(abc.ABC):
         self.parameters = parameters
         self.tf_manager = tf_manager
         self.scene = scene
-        self.outputs: Dict[str, Dict[str, Any]] = {
+        self.outputs: Dict[str, Dict[str, object]] = {
             str(out_name).lower(): dict((output_params or {}).get(out_name, {}) or {})
             for out_name in (output_names or [])
         }
     @classmethod
-    def validate_outputs(cls, outputs: Dict[str, Any]) -> None:
+    def validate_outputs(cls, outputs: Dict[str, object]) -> None:
         """Validate sensor-specific output names. Subclasses may override."""
         return None
 
@@ -76,9 +80,9 @@ class BaseSensor(abc.ABC):
         self,
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, object]:
         """
-        Generates sensor observation data.
+        Generate output payloads for one sensor capture.
 
         Args:
             sim: Habitat simulator instance.
@@ -88,6 +92,12 @@ class BaseSensor(abc.ABC):
                 IMU-like sensors use the velocity/acceleration fields.
 
         Returns:
-            A typed sensor observation payload.
+            Mapping of configured output name to payload. Current payloads are
+            combinations of the existing datatypes:
+            ``PointCloud`` for ``point_cloud``, ``LaserScan`` for
+            ``laser_scan``, ``Imu`` for ``imu``, image aliases such as
+            ``RGBImage``/``DepthMap``/``SemanticMap``/``InstanceMap`` for camera
+            images, ``List[Detection2D]`` for ``bbox2d``, and
+            ``Dict[str, List[OBB3D]]`` for ``bbox3d``.
         """
         pass

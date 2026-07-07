@@ -1,5 +1,6 @@
 import numpy as np
 import habitat_sim
+from typing import Dict
 # pyrefly: ignore [missing-import]
 from src.sensors.lidar3d.base_lidar import LiDAR3D
 from src.datatypes.motion_state import MotionState
@@ -52,12 +53,19 @@ class IdealLiDAR3D(LiDAR3D):
         self,
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-    ):
-        """
-        Run spherical ray casting and return a local-frame PointCloud.
+    ) -> Dict[str, object]:
+        """Run spherical ray casting and return a local-frame point cloud.
+
+        Args:
+            sim: Habitat simulator instance.
+            motion_state: Robot state used to place lidar rays in world space.
 
         Returns:
-            PointCloud with points in the lidar sensor frame.
+            Mapping ``{"point_cloud": PointCloud(...)}`` with points in the
+            lidar sensor frame.
+
+        Raises:
+            RuntimeError: If no shared ``Scene`` was supplied.
         """
         if self.scene is None:
             raise RuntimeError("LiDAR3D requires a Scene; no sim.cast_ray fallback is created.")

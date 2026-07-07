@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Dict
 
 import habitat_sim
 import numpy as np
@@ -14,7 +14,8 @@ from src.utils.geometry import compose_pose, rotate_vectors
 class IdealLaser2D(Laser2D):
     """An ideal binned 2D laser sensor in the local XZ plane."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
+        """Initialize azimuth bins and local ray directions."""
         super().__init__(**kwargs)
         self.azimuth_range = tuple(self.parameters.get("azimuth_range", (-180.0, 180.0)))
         self.azimuth_bins = int(self.parameters.get("azimuth_bins", 720))
@@ -43,7 +44,19 @@ class IdealLaser2D(Laser2D):
         self,
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, object]:
+        """Run planar ray casting and return a laser scan.
+
+        Args:
+            sim: Habitat simulator instance.
+            motion_state: Robot state used to place laser rays in world space.
+
+        Returns:
+            Mapping ``{"laser_scan": LaserScan(...)}``.
+
+        Raises:
+            RuntimeError: If no shared ``Scene`` was supplied.
+        """
         if self.scene is None:
             raise RuntimeError("Laser2D requires a Scene; no sim.cast_ray fallback is created.")
 

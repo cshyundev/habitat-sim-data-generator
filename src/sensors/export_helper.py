@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Callable, Dict
 
 from src.utils.export import McapExporter
 from src.sensors.base_sensor import BaseSensor
@@ -20,7 +21,7 @@ def _write_point_cloud(
     exporter: McapExporter,
     sensor: BaseSensor,
     output_name: str,
-    payload,
+    payload: object,
     timestamp_ns: int,
 ) -> None:
     cloud = payload
@@ -44,7 +45,7 @@ def _write_laser_scan(
     exporter: McapExporter,
     sensor: BaseSensor,
     output_name: str,
-    payload,
+    payload: object,
     timestamp_ns: int,
 ) -> None:
     scan = payload
@@ -62,7 +63,7 @@ def _write_imu(
     exporter: McapExporter,
     sensor: BaseSensor,
     output_name: str,
-    payload,
+    payload: object,
     timestamp_ns: int,
 ) -> None:
     observation = payload
@@ -88,7 +89,7 @@ def _write_rgb_image(
     exporter: McapExporter,
     sensor: BaseSensor,
     output_name: str,
-    payload,
+    payload: object,
     timestamp_ns: int,
 ) -> None:
     img_data = payload
@@ -109,7 +110,7 @@ def _write_depth_image(
     exporter: McapExporter,
     sensor: BaseSensor,
     output_name: str,
-    payload,
+    payload: object,
     timestamp_ns: int,
 ) -> None:
     img_data = payload
@@ -128,7 +129,7 @@ def _write_label_image(
     exporter: McapExporter,
     sensor: BaseSensor,
     output_name: str,
-    payload,
+    payload: object,
     timestamp_ns: int,
 ) -> None:
     img_data = payload
@@ -147,7 +148,7 @@ def _write_detections2d(
     exporter: McapExporter,
     sensor: BaseSensor,
     output_name: str,
-    payload,
+    payload: object,
     timestamp_ns: int,
 ) -> None:
     exporter.write_detections2d(
@@ -162,7 +163,7 @@ def _write_detections3d(
     exporter: McapExporter,
     sensor: BaseSensor,
     output_name: str,
-    payload,
+    payload: object,
     timestamp_ns: int,
 ) -> None:
     world_obbs = (payload or {}).get("world", [])
@@ -175,7 +176,10 @@ def _write_detections3d(
     )
 
 
-_OUTPUT_WRITERS = {
+_OutputWriter = Callable[[McapExporter, BaseSensor, str, object, int], None]
+
+
+_OUTPUT_WRITERS: Dict[str, _OutputWriter] = {
     "point_cloud": _write_point_cloud,
     "laser_scan": _write_laser_scan,
     "imu": _write_imu,
@@ -191,17 +195,18 @@ _OUTPUT_WRITERS = {
 def export_sensor_data(
     exporter: McapExporter,
     sensor: BaseSensor,
-    outputs: dict,
+    outputs: Dict[str, object],
     timestamp_ns: int
 ) -> None:
-    """
-    Transforms raw sensor outputs to ROS coordinates and message formats, and
-    exports them using the provided McapExporter.
+    """Export one sensor's output mapping to the configured MCAP channels.
     
     Args:
         exporter: Opened McapExporter instance.
         sensor: The BaseSensor instance that captured the data.
-        outputs: Mapping of output name to raw payload.
+        outputs: Mapping of output name to payload. Supported payloads are the
+            existing output datatypes/classes: ``PointCloud``, ``LaserScan``,
+            ``Imu``, camera image aliases, ``List[Detection2D]``, and
+            ``Dict[str, List[OBB3D]]``.
         timestamp_ns: Simulation timestamp in nanoseconds.
     """
     if not isinstance(outputs, dict):

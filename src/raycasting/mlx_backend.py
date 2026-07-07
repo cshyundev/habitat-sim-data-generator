@@ -21,7 +21,7 @@ The traversal is a custom Metal compute kernel via ``mlx.core.fast.metal_kernel`
 from __future__ import annotations
 
 import logging
-from typing import Mapping
+from typing import Dict, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -217,12 +217,20 @@ class MLXRaycaster(RaycastBackend):
         geometry: str = "collision",
         dynamic: bool = False,
     ) -> None:
+        """Initialize an unbuilt MLX ray caster.
+
+        Args:
+            leaf_size: Maximum triangles per BLAS leaf.
+            threadgroup: Metal threadgroup size.
+            geometry: Scene geometry source, ``"collision"`` or ``"visual"``.
+            dynamic: Whether to refresh non-static transforms per frame.
+        """
         _require_mlx()
         self.leaf_size = int(leaf_size)
         self.threadgroup = int(threadgroup)
         self.geometry = geometry
         self.dynamic = bool(dynamic)
-        self._model = None
+        self._model: Optional[SceneModel] = None
         self._built = False
         self._kernel = mx.fast.metal_kernel(
             name="bvh2_raycast",
@@ -251,9 +259,8 @@ class MLXRaycaster(RaycastBackend):
         )
 
     @property
-    def scene_model(self):
-        """The extracted scene built in :meth:`bind`/:meth:`build` (``None`` until
-        then). Exposed so detection consumers reuse it instead of re-extracting."""
+    def scene_model(self) -> Optional[SceneModel]:
+        """Extracted scene model, or ``None`` until the backend is built."""
         return self._model
 
     def sync(self, sim) -> None:
@@ -270,6 +277,14 @@ class MLXRaycaster(RaycastBackend):
     # Build
     # ------------------------------------------------------------------
     def build(self, model: SceneModel) -> "MLXRaycaster":
+        """Build GPU buffers and acceleration structures from a scene model.
+
+        Args:
+            model: Extracted scene geometry and per-instance transforms.
+
+        Returns:
+            This raycaster, for fluent setup in benchmarks/tests.
+        """
         _require_mlx()
         self._model = model
         self._n_inst = model.num_instances
@@ -281,8 +296,8 @@ class MLXRaycaster(RaycastBackend):
         v0s, e1s, e2s, fns = [], [], [], []
         node_base = 0
         tri_base = 0
-        mesh_root: dict = {}
-        mesh_local_aabb: dict = {}
+        mesh_root: Dict[str, int] = {}
+        mesh_local_aabb: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
 
         for om in model.objects:
             key = om.mesh_key
@@ -356,7 +371,7 @@ class MLXRaycaster(RaycastBackend):
         return self
 
     # ------------------------------------------------------------------
-    def _instance_world_aabbs(self):
+    def _instance_world_aabbs(self) -> Tuple[np.ndarray, np.ndarray]:
         """World AABBs of all instances from their (local AABB + transform)."""
         # 8 corners of each instance's local AABB.
         lo, hi = self._inst_local_min, self._inst_local_max  # (K,3)
@@ -386,6 +401,16 @@ class MLXRaycaster(RaycastBackend):
     # Dynamic update
     # ------------------------------------------------------------------
     def update_transforms(self, changes: Mapping[int, np.ndarray]) -> None:
+        """Update non-static instance transforms and rebuild the TLAS.
+
+        Args:
+            changes: Mapping from instance index to a new ``(4, 4)`` world
+                transform.
+
+        Raises:
+            RuntimeError: If called before ``build``.
+            ValueError: If an index is invalid or targets a static instance.
+        """
         _require_mlx()
         if not self._built:
             raise RuntimeError("MLXRaycaster.update_transforms called before build()")
@@ -411,10 +436,12 @@ class MLXRaycaster(RaycastBackend):
     # ------------------------------------------------------------------
     @property
     def num_instances(self) -> int:
+        """Number of scene instances in the built acceleration structure."""
         return self._n_inst
 
     @property
     def num_triangles(self) -> int:
+        """Number of triangles in the built acceleration structure."""
         return self._num_triangles
 
     def cast_rays(
@@ -424,6 +451,17 @@ class MLXRaycaster(RaycastBackend):
         min_distance: float = 0.0,
         max_distance: float = float("inf"),
     ) -> RaycastResult:
+        """Intersect rays against the built GPU BVH.
+
+        Args:
+            origins: Ray origins as ``float[N, 3]``.
+            directions: Ray directions as ``float[N, 3]``.
+            min_distance: Hits closer than this are filtered out.
+            max_distance: Maximum ray distance.
+
+        Returns:
+            Batched ray-cast result with hit ids, points, normals, and distances.
+        """
         _require_mlx()
         if not self._built:
             raise RuntimeError("MLXRaycaster.cast_rays called before build()")

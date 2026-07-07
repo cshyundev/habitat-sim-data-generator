@@ -2,7 +2,7 @@ import abc
 import numpy as np
 # pyrefly: ignore [missing-import]
 import habitat_sim
-from typing import Optional, Any, Dict
+from typing import Dict, Optional
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.motion_state import MotionState
 
@@ -31,13 +31,16 @@ class LiDAR3D(BaseSensor, abc.ABC):
         self.ray_directions = None
 
     def is_native(self) -> bool:
+        """Return whether this sensor is backed by a native Habitat sensor."""
         return False
 
     def get_sensor_spec(self) -> Optional[habitat_sim.SensorSpec]:
+        """Return no Habitat SensorSpec because this lidar is custom ray-cast."""
         return None
 
     @classmethod
-    def validate_outputs(cls, outputs: Dict[str, Any]) -> None:
+    def validate_outputs(cls, outputs: Dict[str, object]) -> None:
+        """Validate the 3D lidar output mapping from sensor config."""
         if set(outputs) != {"point_cloud"}:
             raise ValueError(
                 "lidar3d sensors must define exactly one output named 'point_cloud'."
@@ -48,12 +51,15 @@ class LiDAR3D(BaseSensor, abc.ABC):
         self,
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-    ) -> Dict[str, Any]:
-        """
-        Generate sensor observations.
+    ) -> Dict[str, object]:
+        """Generate lidar outputs for one capture.
+
+        Args:
+            sim: Habitat simulator instance.
+            motion_state: Robot state at the capture timestamp.
 
         Returns:
-            A mapping of output name to payload.
+            Mapping ``{"point_cloud": PointCloud(...)}``.
         """
         pass
 
@@ -61,8 +67,18 @@ class LiDAR3D(BaseSensor, abc.ABC):
         self,
         range_image: np.ndarray,
     ) -> np.ndarray:
-        """
-        Convert the 2D range image to local-frame lidar points.
+        """Convert a 2D range image to local-frame lidar points.
+
+        Args:
+            range_image: ``(H, W)`` float array of ray distances in meters.
+
+        Returns:
+            ``(N, 3)`` float32 point array in the lidar sensor frame.
+
+        Raises:
+            RuntimeError: If ray directions have not been initialized.
+            ValueError: If ``range_image`` does not match the precomputed ray
+                direction grid.
         """
         if self.ray_directions is None:
             raise RuntimeError("Ray directions have not been initialized. Ensure subclass initializes them.")

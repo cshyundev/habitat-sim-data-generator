@@ -25,7 +25,12 @@ from src.visualization.visualization_sink import VisualizationSink
 logger = logging.getLogger(__name__)
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for streaming data generation.
+
+    Returns:
+        Parsed command-line arguments.
+    """
     ap = argparse.ArgumentParser(description="Streaming Habitat data generation.")
     ap.add_argument("config", nargs="?", default="config/config_stream.yaml",
                     help="YAML config path (default: config_stream.yaml).")
@@ -36,7 +41,8 @@ def parse_args():
     return ap.parse_args()
 
 
-def main():
+def main() -> None:
+    """Run the configured data-generation pipeline."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
     with open(args.config, "r") as f:

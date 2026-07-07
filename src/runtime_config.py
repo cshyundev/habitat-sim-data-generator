@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 from src.robot_config import ConfigError, RobotBundle, load_robot
 
 
-def _unknown_keys(section: dict, allowed: set[str], ctx: str) -> None:
+def _unknown_keys(section: Dict[str, object], allowed: set[str], ctx: str) -> None:
     extra = set(section) - allowed
     if extra:
         raise ConfigError(f"{ctx}: unknown key(s): {sorted(extra)}")
@@ -20,19 +20,45 @@ def _nonempty_str(value, ctx: str) -> str:
 
 @dataclass(frozen=True)
 class ChannelConfig:
+    """MCAP channel declaration after validation."""
+
     topic: str
     schema: str
 
 
 @dataclass(frozen=True)
 class McapExportConfig:
+    """Validated MCAP export configuration.
+
+    Attributes:
+        channels: Static pipeline channels, keyed by channel id such as
+            ``pose`` or ``occupancy_grid``.
+        sensor_channels: Sensor output channels, keyed by sensor name then
+            output name.
+        export_map: Whether to export the planner occupancy-grid artifact.
+        output_filename: Optional filename override from the MCAP section.
+    """
+
     channels: Dict[str, ChannelConfig]
     sensor_channels: Dict[str, Dict[str, ChannelConfig]]
     export_map: bool = False
     output_filename: Optional[str] = None
 
     @classmethod
-    def from_config(cls, config: dict) -> "McapExportConfig":
+    def from_config(cls, config: Dict[str, object]) -> "McapExportConfig":
+        """Parse the ``mcap_export`` section.
+
+        Args:
+            config: Raw runtime config mapping.
+
+        Returns:
+            Validated MCAP export config. Missing ``mcap_export`` yields an
+            empty config so callers can decide whether to attach an MCAP sink.
+
+        Raises:
+            ConfigError: If channel declarations are malformed, unknown keys are
+                present, or topics are duplicated.
+        """
         section = config.get("mcap_export")
         if section is None:
             return cls(channels={}, sensor_channels={})
@@ -71,13 +97,15 @@ class McapExportConfig:
         }
 
         def register_topic(topic: str, owner: str) -> None:
+            """Reserve a topic and reject duplicates across MCAP channels."""
             if topic in seen_topics:
                 raise ConfigError(
                     f"{owner}: topic '{topic}' already used by '{seen_topics[topic]}'."
                 )
             seen_topics[topic] = owner
 
-        def parse_channel(val: dict, ctx: str) -> ChannelConfig:
+        def parse_channel(val: Dict[str, object], ctx: str) -> ChannelConfig:
+            """Parse one channel declaration from the MCAP config."""
             if not isinstance(val, dict):
                 raise ConfigError(f"{ctx}: must be a mapping.")
             _unknown_keys(val, {"topic", "schema"}, ctx)
@@ -154,7 +182,19 @@ class PlannerConfig:
     local_params: Any
 
     @classmethod
-    def from_config(cls, config: dict) -> "PlannerConfig":
+    def from_config(cls, config: Dict[str, object]) -> "PlannerConfig":
+        """Parse planner type names and delegate parameter parsing.
+
+        Args:
+            config: Raw runtime config mapping.
+
+        Returns:
+            Planner config with chosen planner types and their parsed parameter
+            objects.
+
+        Raises:
+            ConfigError: If a planner type is not registered.
+        """
         from src.planners.registry import (
             available_global_planners,
             available_local_planners,
@@ -186,13 +226,27 @@ class PlannerConfig:
 
 @dataclass(frozen=True)
 class RaycastingConfig:
+    """Validated ray-casting backend selection."""
+
     backend: str = "gpu"
     geometry: str = "collision"
     dynamic: bool = False
     leaf_size: int = 8
 
     @classmethod
-    def from_config(cls, config: dict) -> "RaycastingConfig":
+    def from_config(cls, config: Dict[str, object]) -> "RaycastingConfig":
+        """Parse ray-casting backend settings.
+
+        Args:
+            config: Raw runtime config mapping.
+
+        Returns:
+            Raycasting backend config. ``gpu`` and ``mlx`` select the MLX path;
+            ``sim`` selects the habitat-sim CPU reference path.
+
+        Raises:
+            ConfigError: If keys or enum values are invalid.
+        """
         section = config.get("raycasting")
         if section is None:
             robot = config.get("robot", {}) or {}
@@ -227,6 +281,8 @@ class RaycastingConfig:
 
 @dataclass(frozen=True)
 class RuntimeConfig:
+    """Fully validated runtime configuration used by the streaming entrypoint."""
+
     scene_dataset_config_file: str
     scene_id: str
     output_dir: str
@@ -246,7 +302,20 @@ class RuntimeConfig:
         return int(self.max_duration_sec * 1e9)
 
     @classmethod
-    def from_config(cls, config: dict) -> "RuntimeConfig":
+    def from_config(cls, config: Dict[str, object]) -> "RuntimeConfig":
+        """Validate raw config and load all typed runtime slices.
+
+        Args:
+            config: Raw YAML-derived runtime config mapping.
+
+        Returns:
+            RuntimeConfig with validated scene, planner, raycasting, MCAP, and
+            robot slices. The raw config is not passed downstream.
+
+        Raises:
+            ConfigError: If required fields are missing, unknown keys are
+                present, values are invalid, or robot files cannot be loaded.
+        """
         allowed = {
             "scene_dataset_config_file",
             "scene_id",
@@ -291,5 +360,16 @@ class RuntimeConfig:
         )
 
 
-def validate_runtime_config(config: dict) -> RuntimeConfig:
+def validate_runtime_config(config: Dict[str, object]) -> RuntimeConfig:
+    """Validate raw runtime config.
+
+    Args:
+        config: Raw YAML-derived runtime config mapping.
+
+    Returns:
+        Fully parsed runtime config.
+
+    Raises:
+        ConfigError: If the config is invalid.
+    """
     return RuntimeConfig.from_config(config)

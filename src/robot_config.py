@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Dict, List, Tuple
 
 import yaml
 
@@ -29,23 +29,36 @@ class ConfigError(Exception):
 
 @dataclass
 class SensorOutputSpec:
+    """One declared sensor output and its per-output parameters."""
+
     name: str
-    params: Dict[str, Any] = field(default_factory=dict)
+    params: Dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
 class SensorSpec:
+    """Validated sensor spec consumed by ``SensorSuite``."""
+
     name: str
     type: str
     parent_link: str
     hz: int
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    parameters: Dict[str, object] = field(default_factory=dict)
     outputs: Dict[str, SensorOutputSpec] = field(default_factory=dict)
 
 
 @dataclass
 class RobotBundle:
-    frames: List[dict]          # TFManager link dicts (Habitat Y-up)
+    """Robot structure and sensor declarations loaded from config files.
+
+    Attributes:
+        frames: TFManager link dictionaries in Habitat Y-up coordinates.
+        sensors: Validated sensor specs keyed to URDF links.
+        body_height: Agent capsule height derived from the URDF body.
+        body_radius: Agent capsule radius derived from the URDF body.
+    """
+
+    frames: List[Dict[str, object]]          # TFManager link dicts (Habitat Y-up)
     sensors: List[SensorSpec]
     body_height: float          # agent capsule / navmesh — derived from the URDF body
     body_radius: float
@@ -54,20 +67,20 @@ class RobotBundle:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _require(d: dict, key: str, ctx: str):
+def _require(d: Dict[str, object], key: str, ctx: str) -> object:
     if not isinstance(d, dict) or key not in d:
         raise ConfigError(f"{ctx}: missing required key '{key}'.")
     return d[key]
 
 
-def _require_nonempty_str(d: dict, key: str, ctx: str) -> str:
+def _require_nonempty_str(d: Dict[str, object], key: str, ctx: str) -> str:
     val = _require(d, key, ctx)
     if not isinstance(val, str) or not val.strip():
         raise ConfigError(f"{ctx}: '{key}' must be a non-empty string (got {val!r}).")
     return val
 
 
-def _resolve_urdf_text(robot: dict):
+def _resolve_urdf_text(robot: Dict[str, object]) -> Tuple[str, str]:
     """Return ``(urdf_text, base_dir)`` loaded from the required ``robot.urdf``."""
     urdf_path = _require_nonempty_str(robot, "urdf", "robot")
     if not os.path.exists(urdf_path):
@@ -76,14 +89,30 @@ def _resolve_urdf_text(robot: dict):
         return f.read(), os.path.dirname(os.path.abspath(urdf_path))
 
 
-def _parse_urdf_frames(text: str) -> List[dict]:
+def _parse_urdf_frames(text: str) -> List[Dict[str, object]]:
     try:
         return urdf_frames(text)
     except Exception as exc:  # malformed XML, etc.
         raise ConfigError(f"robot URDF could not be parsed: {exc}") from exc
 
 
-def _load_sensor_specs(robot: dict, frame_names: set) -> List[SensorSpec]:
+def _load_sensor_specs(
+    robot: Dict[str, object],
+    frame_names: set[str],
+) -> List[SensorSpec]:
+    """Load and validate sensor declarations from ``robot.sensors``.
+
+    Args:
+        robot: Raw ``robot`` config section.
+        frame_names: Link names parsed from the robot URDF.
+
+    Returns:
+        Validated sensor specs with output declarations normalized to lowercase.
+
+    Raises:
+        ConfigError: If the sensor spec file is missing, malformed, references
+            unknown frames, or declares unsupported outputs.
+    """
     path = _require_nonempty_str(robot, "sensors", "robot")
     if not os.path.exists(path):
         raise ConfigError(f"robot.sensors: file not found: {path}")
@@ -208,8 +237,19 @@ def _load_sensor_specs(robot: dict, frame_names: set) -> List[SensorSpec]:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
-def load_robot(config: dict) -> RobotBundle:
-    """Load + validate the robot URDF and sensor spec. Raises ``ConfigError``."""
+def load_robot(config: Dict[str, object]) -> RobotBundle:
+    """Load and validate the robot URDF plus sensor spec file.
+
+    Args:
+        config: Raw runtime config mapping with a required ``robot`` section.
+
+    Returns:
+        RobotBundle containing the parsed frame tree, validated sensors, and
+        body dimensions derived from the URDF.
+
+    Raises:
+        ConfigError: If required robot fields/files are missing or invalid.
+    """
     robot = config.get("robot")
     if not isinstance(robot, dict):
         raise ConfigError("config: missing 'robot' section.")

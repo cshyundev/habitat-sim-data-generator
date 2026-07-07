@@ -8,7 +8,7 @@ visualization logic -- those live in sinks.
 import logging
 import numpy as np
 import habitat_sim
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from src.datatypes.pose import Pose3D
 from src.sensors.suite import SensorSuite
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def _agent_start_pose(sim: habitat_sim.Simulator) -> Pose3D:
-    """Reads the simulator agent's current state as a Pose3D (Habitat frame)."""
+    """Read the simulator agent's current state as a Habitat-frame pose."""
     state = sim.get_agent(0).get_state()
     rot = state.rotation
     return Pose3D(
@@ -43,14 +43,25 @@ class StreamingPipeline:
         global_planner: BaseGlobalPlanner,
         local_planner: BaseLocalPlanner,
         scene_markers: List[dict],
-        category_names=None,
+        category_names: Optional[Dict[int, str]] = None,
         max_duration_ns: Optional[int] = None,
     ):
+        """Initialize a ready-to-run streaming pipeline.
+
+        Args:
+            sim: Habitat simulator with agent and scene already created.
+            sensor_suite: Sensor suite bound to the same robot config.
+            global_planner: Planner that produces coarse waypoints.
+            local_planner: Planner that turns waypoints into timestamped motion.
+            scene_markers: ROS marker dictionaries for static scene export.
+            category_names: Semantic category table for metadata sidecars.
+            max_duration_ns: Optional cap on emitted trajectory duration.
+        """
         self.sim = sim
         self.sensor_suite = sensor_suite
         self.global_planner = global_planner
         self.local_planner = local_planner
-        self.artifacts = {}
+        self.artifacts: Dict[str, object] = {}
         self.scene_markers = scene_markers
         self.duration_ns = 0
         self.category_names = category_names or {}
@@ -58,7 +69,11 @@ class StreamingPipeline:
         self.max_duration_ns = max_duration_ns
 
     def _plan_trajectory(self) -> None:
-        """Runs the configured global planner and seeds the local planner."""
+        """Run global planning and seed the local planner.
+
+        Raises:
+            RuntimeError: If the global planner produces no waypoints.
+        """
         start_pose = _agent_start_pose(self.sim)
         planning = self.global_planner.plan(self.sim, start_pose=start_pose)
         waypoints = planning.waypoints
@@ -74,10 +89,16 @@ class StreamingPipeline:
         self.duration_ns = duration_ns
 
     def run(self, sinks: List[StreamSink]) -> int:
-        """
-        Runs the streaming loop, returning the number of capture events emitted.
+        """Run the event-driven capture loop.
 
-        on_finish is always called (even on error) so sinks can flush/close.
+        ``on_finish`` is always called, even when planning or capture raises, so
+        sinks can flush and close external resources.
+
+        Args:
+            sinks: Consumers that receive the same start/event/finish stream.
+
+        Returns:
+            Number of capture events emitted.
         """
 
         self._plan_trajectory()
@@ -132,17 +153,22 @@ def build_pipeline(
     sim: habitat_sim.Simulator,
     sensor_suite: SensorSuite,
 ) -> StreamingPipeline:
-    """
-    Wires configured planners, scene context, and detector jobs into a ready-to-run
-    StreamingPipeline.
+    """Build a ready-to-run streaming pipeline.
 
     Args:
         runtime_config: Validated config (parsed once at the entry point). Planners,
             the trajectory cap, and the scene-dataset path are read from its typed
             slices -- the pipeline never sees the raw dict.
+        sim: Habitat simulator instance.
+        sensor_suite: Sensor suite attached to ``sim``.
+
+    Returns:
+        StreamingPipeline with planners, scene markers, semantic categories, and
+        duration cap wired in.
 
     Raises:
-        RuntimeError: if the global planner produced no waypoints.
+        RuntimeError: If scene marker extraction fails before the pipeline is
+            constructed.
     """
     global_planner, local_planner = build_planners(runtime_config.planner)
 

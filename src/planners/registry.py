@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Dict, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Tuple
 
 from src.planners.global_planning.base import BaseGlobalPlanner
 from src.planners.global_planning.params import ZigzagCoverageParams
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 # params -- the only thing that touches the dict, and only during boundary parse.
 GlobalPlannerBuilder = Callable[[Any], BaseGlobalPlanner]
 LocalPlannerBuilder = Callable[[Any], BaseLocalPlanner]
-ParamsParser = Callable[[dict], Any]
+ParamsParser = Callable[[Mapping[str, object]], Any]
 
 
 @dataclass(frozen=True)
@@ -33,11 +33,17 @@ _GLOBAL_PLANNERS: Dict[str, _PlannerEntry] = {}
 _LOCAL_PLANNERS: Dict[str, _PlannerEntry] = {}
 
 
-def _identity_params(config: dict) -> dict:
+def _identity_params(config: Mapping[str, object]) -> Mapping[str, object]:
+    """Return raw planner params for plugins that do their own parsing."""
     return config
 
 
-def _planner_section(config: dict, key: str, legacy_key: str | None = None) -> dict:
+def _planner_section(
+    config: Mapping[str, object],
+    key: str,
+    legacy_key: str | None = None,
+) -> Mapping[str, object]:
+    """Read a planner config subsection, including legacy top-level keys."""
     planner = config.get("planner", {}) or {}
     if isinstance(planner, dict) and key in planner:
         section = planner.get(key) or {}
@@ -50,12 +56,28 @@ def _planner_section(config: dict, key: str, legacy_key: str | None = None) -> d
     return section
 
 
-def global_planner_type(config: dict) -> str:
+def global_planner_type(config: Mapping[str, object]) -> str:
+    """Return the configured global planner type.
+
+    Args:
+        config: Raw runtime configuration mapping.
+
+    Returns:
+        Lowercase global planner type name.
+    """
     section = _planner_section(config, "global")
     return str(section.get("type", "zigzag")).lower()
 
 
-def local_planner_type(config: dict) -> str:
+def local_planner_type(config: Mapping[str, object]) -> str:
+    """Return the configured local planner type.
+
+    Args:
+        config: Raw runtime configuration mapping.
+
+    Returns:
+        Lowercase local planner type name.
+    """
     planner = config.get("planner", {}) or {}
     if isinstance(planner, dict) and "local" in planner:
         section = planner.get("local") or {}
@@ -71,6 +93,13 @@ def register_global_planner(
     builder: GlobalPlannerBuilder,
     params_parser: ParamsParser = _identity_params,
 ) -> None:
+    """Register a global planner implementation.
+
+    Args:
+        type_name: Type name used in config.
+        builder: Callable that receives typed params and returns a planner.
+        params_parser: Boundary parser from raw config to typed params.
+    """
     key = str(type_name).lower()
     existing = _GLOBAL_PLANNERS.get(key)
     if existing is not None and existing.builder is not builder:
@@ -83,6 +112,13 @@ def register_local_planner(
     builder: LocalPlannerBuilder,
     params_parser: ParamsParser = _identity_params,
 ) -> None:
+    """Register a local planner implementation.
+
+    Args:
+        type_name: Type name used in config.
+        builder: Callable that receives typed params and returns a planner.
+        params_parser: Boundary parser from raw config to typed params.
+    """
     key = str(type_name).lower()
     existing = _LOCAL_PLANNERS.get(key)
     if existing is not None and existing.builder is not builder:
@@ -91,10 +127,12 @@ def register_local_planner(
 
 
 def available_global_planners() -> tuple[str, ...]:
+    """Return registered global planner type names."""
     return tuple(sorted(_GLOBAL_PLANNERS))
 
 
 def available_local_planners() -> tuple[str, ...]:
+    """Return registered local planner type names."""
     return tuple(sorted(_LOCAL_PLANNERS))
 
 
@@ -118,24 +156,38 @@ def _require_local(key: str) -> _PlannerEntry:
     return entry
 
 
-def parse_global_params(config: dict) -> Any:
-    """Boundary parse: raw dict -> the chosen global planner's typed params."""
+def parse_global_params(config: Mapping[str, object]) -> Any:
+    """Parse raw config into the selected global planner's params."""
     return _require_global(global_planner_type(config)).params_parser(config)
 
 
-def parse_local_params(config: dict) -> Any:
-    """Boundary parse: raw dict -> the chosen local planner's typed params."""
+def parse_local_params(config: Mapping[str, object]) -> Any:
+    """Parse raw config into the selected local planner's params."""
     return _require_local(local_planner_type(config)).params_parser(config)
 
 
-def create_global_planner(config: dict) -> BaseGlobalPlanner:
-    """Convenience boundary factory: parse the dict and build in one step."""
+def create_global_planner(config: Mapping[str, object]) -> BaseGlobalPlanner:
+    """Build the selected global planner from raw config.
+
+    Args:
+        config: Raw runtime configuration mapping.
+
+    Returns:
+        Configured global planner instance.
+    """
     entry = _require_global(global_planner_type(config))
     return entry.builder(entry.params_parser(config))
 
 
-def create_local_planner(config: dict) -> BaseLocalPlanner:
-    """Convenience boundary factory: parse the dict and build in one step."""
+def create_local_planner(config: Mapping[str, object]) -> BaseLocalPlanner:
+    """Build the selected local planner from raw config.
+
+    Args:
+        config: Raw runtime configuration mapping.
+
+    Returns:
+        Configured local planner instance.
+    """
     entry = _require_local(local_planner_type(config))
     return entry.builder(entry.params_parser(config))
 
@@ -143,8 +195,14 @@ def create_local_planner(config: dict) -> BaseLocalPlanner:
 def build_planners(
     planner_config: "PlannerConfig",
 ) -> Tuple[BaseGlobalPlanner, BaseLocalPlanner]:
-    """Build both planners from an already-parsed :class:`PlannerConfig` slice --
-    the downstream path (no raw dict, no re-parse)."""
+    """Build global and local planners from parsed config.
+
+    Args:
+        planner_config: Validated planner configuration slice.
+
+    Returns:
+        Pair of ``(global_planner, local_planner)``.
+    """
     global_planner = _require_global(planner_config.global_type).builder(
         planner_config.global_params
     )

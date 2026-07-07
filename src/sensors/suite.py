@@ -1,4 +1,4 @@
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import habitat_sim
 
 from src.utils.tf import TFManager
@@ -76,8 +76,9 @@ class SensorSuite:
             sensor = sensor_cls(**kwargs)
             self.sensors.append(sensor)
 
-    def sensor_outputs(self) -> Dict[str, Dict[str, Any]]:
-        outputs: Dict[str, Dict[str, Any]] = {}
+    def sensor_outputs(self) -> Dict[str, Dict[str, object]]:
+        """Return configured output metadata keyed by ``sensor.output``."""
+        outputs: Dict[str, Dict[str, object]] = {}
         for spec in self._spec_by_name.values():
             for output_name, output in spec.outputs.items():
                 outputs[f"{spec.name}.{output_name}"] = {
@@ -150,27 +151,50 @@ class SensorSuite:
         sensors: List[BaseSensor],
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> Dict[str, Dict[str, object]]:
         """
-        Fetches observations from the given sensors at the current motion state.
+        Capture outputs for all sensors firing at one event timestamp.
 
         The caller must have already applied ``motion_state.pose`` to the
         simulator's agent (native sensors render from the sim's current pose).
+
+        Args:
+            sensors: Sensors that fire at this event.
+            sim: Habitat simulator instance.
+            motion_state: Robot state used by non-native sensors and metadata.
+
+        Returns:
+            Mapping of sensor name to its output mapping. Each inner mapping is
+            keyed by declared output name and carries one of the existing
+            payload classes or image aliases documented by ``BaseSensor``.
         """
         # Prepare the shared Scene: bind once (idempotent), then refresh any moved
         # geometry. Done here (once per capture) rather than per sensor.
         self.scene.bind(sim)
         self.scene.sync(sim)
 
-        observations: Dict[str, Dict[str, Any]] = {}
+        observations: Dict[str, Dict[str, object]] = {}
         for sensor in sensors:
             raw_outputs = sensor.get_observation(sim, motion_state)
             observations[sensor.name] = self.capture_outputs(sensor, raw_outputs)
         return observations
 
     def capture_outputs(
-        self, sensor: BaseSensor, raw_outputs: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, sensor: BaseSensor, raw_outputs: Dict[str, object]
+    ) -> Dict[str, object]:
+        """Normalize and validate one sensor's returned output mapping.
+
+        Args:
+            sensor: Sensor that produced ``raw_outputs``.
+            raw_outputs: Mapping returned by ``sensor.get_observation``.
+
+        Returns:
+            Output mapping with lowercased output names.
+
+        Raises:
+            RuntimeError: If the sensor returns a non-mapping payload or an
+                output name that was not declared in its config.
+        """
         spec = self._spec_by_name[sensor.name]
         if not isinstance(raw_outputs, dict):
             raise RuntimeError(
@@ -178,7 +202,7 @@ class SensorSuite:
                 "expected a mapping of output name to payload."
             )
 
-        outputs: Dict[str, Any] = {}
+        outputs: Dict[str, object] = {}
         for output_name, payload in raw_outputs.items():
             output_key = str(output_name).lower()
             if output_key not in spec.outputs:

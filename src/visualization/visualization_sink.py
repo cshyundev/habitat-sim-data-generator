@@ -11,6 +11,7 @@ the backend receives final ROS-frame arrays only; this keeps the live view
 consistent with the MCAP/offline view.
 """
 import numpy as np
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
 from src.datatypes.imu import Imu
@@ -23,17 +24,20 @@ from src.utils.coords import (
     habitat_to_ros_obb,
 )
 
+if TYPE_CHECKING:
+    from src.sensors.base_sensor import BaseSensor
+
 _LIDAR_COLOR = [0, 255, 255]
 _TRAJECTORY_COLOR = [0, 255, 0]
 
 
-def _class_color(class_id: int):
+def _class_color(class_id: int) -> List[int]:
     """Stable pseudo-random RGB color per semantic class id."""
     rng = np.random.default_rng((int(class_id) * 2654435761) % (2 ** 32))
     return [int(x) for x in rng.integers(60, 256, 3)]
 
 
-def _normalize_vertex_colors(colors, n_vertices: int):
+def _normalize_vertex_colors(colors: object, n_vertices: int) -> Optional[np.ndarray]:
     """
     Normalizes marker vertex colors to (n_vertices, 3) uint8, or None.
 
@@ -57,6 +61,16 @@ def _normalize_vertex_colors(colors, n_vertices: int):
 
 
 class VisualizationSink(StreamSink):
+    """Stream sink that logs pipeline events to a visualization backend.
+
+    Args:
+        backend: Concrete renderer-neutral visualization backend.
+        robot_path: Entity path for the moving robot frame.
+        scene_path: Entity path for static scene geometry.
+        trajectory_path: Entity path for the robot trajectory polyline.
+        imu_path: Entity path root for IMU scalar time series.
+    """
+
     def __init__(
         self,
         backend: VisualizationBackend,
@@ -64,19 +78,21 @@ class VisualizationSink(StreamSink):
         scene_path: str = "world/scene",
         trajectory_path: str = "world/trajectory",
         imu_path: str = "imu",
-    ):
+    ) -> None:
+        """Initialize backend paths used for visualization logging."""
         self.backend = backend
         self.robot_path = robot_path
         self.scene_path = scene_path
         self.trajectory_path = trajectory_path
         self.imu_path = imu_path
         self.detections_path = "world/detections"
-        self._trajectory: list = []
+        self._trajectory: List[List[float]] = []
 
     # ------------------------------------------------------------------
     # StreamSink
     # ------------------------------------------------------------------
     def on_start(self, ctx: StreamContext) -> None:
+        """Initialize the viewer and log static scene/sensor frames."""
         self.backend.start()
 
         # Layout: a single 3D view, plus one combined IMU time-series window
@@ -130,6 +146,11 @@ class VisualizationSink(StreamSink):
             )
 
     def on_event(self, ev: StreamEvent) -> None:
+        """Log one pipeline event.
+
+        Args:
+            ev: Timestamped motion state and sensor outputs.
+        """
         self.backend.set_time(ev.timestamp_ns)
 
         ros_pose = habitat_to_ros_pose(ev.motion_state.pose)
@@ -150,12 +171,19 @@ class VisualizationSink(StreamSink):
                 self.log_outputs(sensor, observation)
 
     def on_finish(self) -> None:
+        """Close the visualization backend."""
         self.backend.close()
 
     # ------------------------------------------------------------------
     # Output handlers
     # ------------------------------------------------------------------
-    def log_outputs(self, sensor, outputs: dict) -> None:
+    def log_outputs(self, sensor: "BaseSensor", outputs: Dict[str, object]) -> None:
+        """Dispatch one sensor's output payloads to concrete loggers.
+
+        Args:
+            sensor: Sensor that produced the outputs.
+            outputs: Mapping from output name to payload.
+        """
         for output_name, payload in outputs.items():
             output_key = str(output_name).lower()
             if output_key == "point_cloud":

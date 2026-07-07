@@ -20,12 +20,15 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from typing import List
 
 import numpy as np
 
 
 @dataclass
 class BVH:
+    """Flattened bounding-volume hierarchy arrays for traversal."""
+
     node_min: np.ndarray
     node_max: np.ndarray
     node_left: np.ndarray
@@ -36,6 +39,7 @@ class BVH:
 
     @property
     def num_nodes(self) -> int:
+        """Number of flattened BVH nodes."""
         return int(self.node_min.shape[0])
 
 
@@ -53,7 +57,7 @@ def build_bvh(tri_min: np.ndarray, tri_max: np.ndarray, leaf_size: int = 8) -> B
 
     n_min, n_max = [], []
     n_left, n_right, n_start, n_count = [], [], [], []
-    order: list = []
+    order: List[int] = []
 
     # Iterative build to avoid Python recursion limits on large scenes.
     # Each task: (parent_node_index, child_slot, triangle_index_array)

@@ -18,11 +18,20 @@ from src.visualization.backend import VisualizationBackend
 
 
 class RerunBackend(VisualizationBackend):
+    """Visualization backend that sends live logs to Rerun.
+
+    Args:
+        app_id: Rerun application id.
+        timeline: Timeline name used for simulation time.
+    """
+
     def __init__(self, app_id: str = "habitat_stream_visualizer", timeline: str = "sim_time"):
+        """Initialize backend identifiers without opening Rerun yet."""
         self.app_id = app_id
         self.timeline = timeline
 
     def start(self) -> None:
+        """Initialize Rerun and spawn or save the recording."""
         # Spawn the live viewer, unless RERUN_SAVE is set (then record to that
         # .rrd path headlessly -- used for testing without a display).
         save_path = os.environ.get("RERUN_SAVE")
@@ -31,9 +40,15 @@ class RerunBackend(VisualizationBackend):
             rr.save(save_path)
 
     def set_time(self, timestamp_ns: int) -> None:
+        """Set the current Rerun timeline time.
+
+        Args:
+            timestamp_ns: Absolute simulation timestamp in nanoseconds.
+        """
         rr.set_time(self.timeline, duration=timestamp_ns / 1e9)
 
     def log_axes(self, path: str, length: float = 0.3) -> None:
+        """Log static RGB coordinate axes at an entity path."""
         rr.log(
             path,
             rr.Arrows3D(
@@ -52,6 +67,7 @@ class RerunBackend(VisualizationBackend):
         rotation_xyzw: np.ndarray,
         static: bool = False,
     ) -> None:
+        """Log a transform in the Rerun entity hierarchy."""
         rr.log(
             path,
             rr.Transform3D(
@@ -71,6 +87,7 @@ class RerunBackend(VisualizationBackend):
         scale: np.ndarray,
         triangle_indices: Optional[np.ndarray] = None,
     ) -> None:
+        """Log a static triangle mesh plus its transform."""
         # Static so the scene is visible at every point on the timeline.
         rr.log(
             path,
@@ -101,6 +118,7 @@ class RerunBackend(VisualizationBackend):
         color: Sequence[int],
         radius: float = 0.02,
     ) -> None:
+        """Log a 3D point cloud."""
         rr.log(path, rr.Points3D(np.asarray(points, dtype=np.float32), colors=color, radii=radius))
 
     def log_trajectory(
@@ -109,12 +127,23 @@ class RerunBackend(VisualizationBackend):
         points: Sequence[Sequence[float]],
         color: Sequence[int],
     ) -> None:
+        """Log a trajectory as a 3D line strip."""
         rr.log(path, rr.LineStrips3D([points], colors=[color], radii=0.015))
 
     def log_scalar(self, path: str, value: float) -> None:
+        """Log one scalar sample."""
         rr.log(path, rr.Scalars(value))
 
-    def log_boxes3d(self, path, centers, half_sizes, quats_xyzw, colors, labels) -> None:
+    def log_boxes3d(
+        self,
+        path: str,
+        centers: Sequence[Sequence[float]],
+        half_sizes: Sequence[Sequence[float]],
+        quats_xyzw: Sequence[Sequence[float]],
+        colors: Sequence[Sequence[int]],
+        labels: Sequence[str],
+    ) -> None:
+        """Log oriented 3D bounding boxes."""
         if len(centers) == 0:
             rr.log(path, rr.Clear(recursive=False))
             return
@@ -129,7 +158,15 @@ class RerunBackend(VisualizationBackend):
             ),
         )
 
-    def log_image_boxes2d(self, path, image, boxes_xyxy, colors, labels) -> None:
+    def log_image_boxes2d(
+        self,
+        path: str,
+        image: np.ndarray,
+        boxes_xyxy: Sequence[Sequence[float]],
+        colors: Sequence[Sequence[int]],
+        labels: Sequence[str],
+    ) -> None:
+        """Log an RGB image and its 2D bounding boxes."""
         rr.log(path, rr.Image(np.asarray(image)[..., :3]))
         if len(boxes_xyxy) == 0:
             rr.log(f"{path}/boxes", rr.Clear(recursive=False))
@@ -150,6 +187,7 @@ class RerunBackend(VisualizationBackend):
         scalar_view_origins: Sequence[str] = (),
         image_view_origins: Sequence[str] = (),
     ) -> None:
+        """Send a Rerun blueprint for spatial, image, and scalar views."""
         # 3D scene + one 2D image view per image origin (camera + its 2D boxes) +
         # one time-series window per scalar origin (e.g. all 6 IMU channels).
         spatial = rrb.Spatial3DView(origin=spatial_origin, name="3D")

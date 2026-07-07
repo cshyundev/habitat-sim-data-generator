@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from mcap_ros2.writer import Writer as Ros2Writer
@@ -11,27 +11,29 @@ from src.datatypes.bbox import Detection2D, OBB3D
 from src.runtime_config import McapExportConfig
 from src.utils.ros_msgdefs import MSGDEFS
 
+RosMessage = Dict[str, object]
 
-def _stamp(timestamp_ns: int) -> dict:
+
+def _stamp(timestamp_ns: int) -> RosMessage:
     return {
         "sec": int(timestamp_ns // 1_000_000_000),
         "nanosec": int(timestamp_ns % 1_000_000_000),
     }
 
 
-def _header(timestamp_ns: int, frame_id: str) -> dict:
+def _header(timestamp_ns: int, frame_id: str) -> RosMessage:
     return {"stamp": _stamp(timestamp_ns), "frame_id": frame_id}
 
 
-def _point(v) -> dict:
+def _point(v: Sequence[float]) -> RosMessage:
     return {"x": float(v[0]), "y": float(v[1]), "z": float(v[2])}
 
 
-def _quat(v) -> dict:
+def _quat(v: Sequence[float]) -> RosMessage:
     return {"x": float(v[0]), "y": float(v[1]), "z": float(v[2]), "w": float(v[3])}
 
 
-def _unroll_marker_geometry(marker_info: dict):
+def _unroll_marker_geometry(marker_info: Dict[str, object]) -> Tuple[np.ndarray, np.ndarray]:
     """Expands a marker's (vertices, indices) mesh into a flat point/color list,
     matching the ``visualization_msgs/Marker`` TRIANGLE_LIST convention (one
     entry per triangle-list vertex, no shared index buffer on the wire)."""
@@ -62,7 +64,11 @@ def _unroll_marker_geometry(marker_info: dict):
     return unrolled_points, unrolled_colors
 
 
-def _marker_message(marker_info: dict, timestamp_ns: int, frame_id: str) -> dict:
+def _marker_message(
+    marker_info: Dict[str, object],
+    timestamp_ns: int,
+    frame_id: str,
+) -> RosMessage:
     pts, cols = _unroll_marker_geometry(marker_info)
     points = [_point(p) for p in pts]
     colors = [
@@ -101,7 +107,9 @@ def _marker_message(marker_info: dict, timestamp_ns: int, frame_id: str) -> dict
     }
 
 
-def _tf_message(timestamp_ns: int, frame_id: str, child_frame_id: str, pose: Pose3D) -> dict:
+def _tf_message(
+    timestamp_ns: int, frame_id: str, child_frame_id: str, pose: Pose3D
+) -> RosMessage:
     return {
         "transforms": [
             {
@@ -132,15 +140,25 @@ class McapExporter:
     by any ROS 2 / Foxglove / rosbag2 tool.
     """
     def __init__(self, mcap_path: str, export_config: McapExportConfig):
+        """Create an exporter for one MCAP file.
+
+        Args:
+            mcap_path: Destination MCAP path.
+            export_config: Validated channel/schema configuration.
+        """
         self.mcap_path = mcap_path
         self.export_config = export_config  # parsed once at the entry point
         self.file = None
         self.writer: Optional[Ros2Writer] = None
-        self.schemas = {}   # schema_name -> mcap.records.Schema
-        self.channels = {}  # channel_key -> (topic, Schema)
+        self.schemas: Dict[str, object] = {}   # schema_name -> mcap.records.Schema
+        self.channels: Dict[str, tuple[str, object]] = {}  # channel_key -> (topic, Schema)
 
     def start(self) -> None:
-        """Opens the output file, initializes the writer, and registers schemas/channels."""
+        """Open the output file and register static channels.
+
+        Raises:
+            KeyError: If a configured schema is missing from ``MSGDEFS``.
+        """
         dir_name = os.path.dirname(self.mcap_path)
         if dir_name:
             os.makedirs(dir_name, exist_ok=True)
@@ -153,13 +171,22 @@ class McapExporter:
             self.register_channel_dynamic(key, val.topic, val.schema)
 
     def register_channel_dynamic(self, key: str, topic: str, schema_name: str) -> None:
-        """Dynamically registers a schema and channel for sensor output if not already present."""
+        """Register a schema/channel pair if the channel key is new.
+
+        Args:
+            key: Internal channel key used by writer methods.
+            topic: ROS topic name.
+            schema_name: ROS message type name present in ``MSGDEFS``.
+
+        Raises:
+            KeyError: If ``schema_name`` has no registered message definition.
+        """
         if key in self.channels:
             return
 
         self.channels[key] = (topic, self._get_schema(schema_name))
 
-    def _get_schema(self, schema_name: str):
+    def _get_schema(self, schema_name: str) -> object:
         schema = self.schemas.get(schema_name)
         if schema is None:
             msgdef_text = MSGDEFS.get(schema_name)
@@ -172,12 +199,12 @@ class McapExporter:
             self.schemas[schema_name] = schema
         return schema
 
-    def _channel(self, key: str):
+    def _channel(self, key: str) -> tuple[str, object]:
         if key not in self.channels:
             raise KeyError(f"Channel for '{key}' is not registered. Please define it or register dynamically.")
         return self.channels[key]
 
-    def _write(self, key: str, timestamp_ns: int, message: dict) -> None:
+    def _write(self, key: str, timestamp_ns: int, message: RosMessage) -> None:
         topic, schema = self._channel(key)
         self.writer.write_message(
             topic=topic,
@@ -191,7 +218,13 @@ class McapExporter:
         self, timestamp_ns: int, frame_id: str,
         pose: Pose3D
     ) -> None:
-        """Writes PoseStamped message."""
+        """Write a ``geometry_msgs/msg/PoseStamped`` message.
+
+        Args:
+            timestamp_ns: Message timestamp in nanoseconds.
+            frame_id: Header frame id.
+            pose: Pose to serialize.
+        """
         self._write("pose", timestamp_ns, {
             "header": _header(timestamp_ns, frame_id),
             "pose": {
@@ -204,7 +237,14 @@ class McapExporter:
         self, timestamp_ns: int, frame_id: str, channel_key: str,
         cloud: PointCloud
     ) -> None:
-        """Writes PointCloud2 message."""
+        """Write a ``sensor_msgs/msg/PointCloud2`` message.
+
+        Args:
+            timestamp_ns: Message timestamp in nanoseconds.
+            frame_id: Header frame id.
+            channel_key: Registered MCAP channel key.
+            cloud: Point cloud with ``(N, 3)`` float points.
+        """
         pts = np.asarray(cloud.points, dtype=np.float32)
         n = int(pts.shape[0])
 
@@ -232,7 +272,14 @@ class McapExporter:
         self, timestamp_ns: int, frame_id: str, channel_key: str,
         scan: LaserScan
     ) -> None:
-        """Writes LaserScan message."""
+        """Write a ``sensor_msgs/msg/LaserScan`` message.
+
+        Args:
+            timestamp_ns: Message timestamp in nanoseconds.
+            frame_id: Header frame id.
+            channel_key: Registered MCAP channel key.
+            scan: Laser scan payload.
+        """
         intensities = (
             np.asarray(scan.semantic_ids, dtype=np.float32).tolist()
             if scan.semantic_ids is not None else []
@@ -252,9 +299,16 @@ class McapExporter:
 
     def write_detections2d(
         self, timestamp_ns: int, frame_id: str, channel_key: str,
-        detections: list
+        detections: List[Detection2D]
     ) -> None:
-        """Writes a habitat_msgs/Detection2DArray message for a list of Detection2D."""
+        """Write a ``habitat_msgs/Detection2DArray`` message.
+
+        Args:
+            timestamp_ns: Message timestamp in nanoseconds.
+            frame_id: Header frame id.
+            channel_key: Registered MCAP channel key.
+            detections: 2D detections in image pixel coordinates.
+        """
         dets = [
             {
                 "instance_id": int(d.instance_id),
@@ -271,9 +325,16 @@ class McapExporter:
 
     def write_detections3d(
         self, timestamp_ns: int, frame_id: str, channel_key: str,
-        obbs: list
+        obbs: List[OBB3D]
     ) -> None:
-        """Writes a habitat_msgs/Detection3DArray message for a list of OBB3D."""
+        """Write a ``habitat_msgs/Detection3DArray`` message.
+
+        Args:
+            timestamp_ns: Message timestamp in nanoseconds.
+            frame_id: Header frame id.
+            channel_key: Registered MCAP channel key.
+            obbs: 3D oriented boxes already expressed in the target frame.
+        """
         dets = [
             {
                 "instance_id": int(o.instance_id),
@@ -297,7 +358,17 @@ class McapExporter:
         origin_pose: Pose3D,
         grid_data: np.ndarray
     ) -> None:
-        """Writes OccupancyGrid message."""
+        """Write a ``nav_msgs/msg/OccupancyGrid`` message.
+
+        Args:
+            timestamp_ns: Message timestamp in nanoseconds.
+            frame_id: Header frame id.
+            resolution: Grid resolution in meters per cell.
+            width: Grid width in cells.
+            height: Grid height in cells.
+            origin_pose: ROS-frame origin pose of the grid.
+            grid_data: Occupancy values flattened row-major by this method.
+        """
         self._write("occupancy_grid", timestamp_ns, {
             "header": _header(timestamp_ns, frame_id),
             "info": {
@@ -315,9 +386,15 @@ class McapExporter:
 
     def write_map_3d_marker_array(
         self, timestamp_ns: int, frame_id: str,
-        markers_list: list
+        markers_list: List[dict]
     ) -> None:
-        """Writes MarkerArray (visualization_msgs/msg/MarkerArray) message."""
+        """Write a ``visualization_msgs/msg/MarkerArray`` scene message.
+
+        Args:
+            timestamp_ns: Message timestamp in nanoseconds.
+            frame_id: Header frame id assigned to each marker.
+            markers_list: Marker dictionaries produced by scene extraction.
+        """
         self._write("map_3d_marker_array", timestamp_ns, {
             "markers": [_marker_message(m, timestamp_ns, frame_id) for m in markers_list],
         })
@@ -326,21 +403,30 @@ class McapExporter:
         self, timestamp_ns: int, frame_id: str, child_frame_id: str,
         pose: Pose3D
     ) -> None:
-        """Writes static TFMessage."""
+        """Write one static ``tf2_msgs/msg/TFMessage`` transform."""
         self._write("tf_static", timestamp_ns, _tf_message(timestamp_ns, frame_id, child_frame_id, pose))
 
     def write_dynamic_tf(
         self, timestamp_ns: int, frame_id: str, child_frame_id: str,
         pose: Pose3D
     ) -> None:
-        """Writes dynamic TFMessage."""
+        """Write one dynamic ``tf2_msgs/msg/TFMessage`` transform."""
         self._write("tf_dynamic", timestamp_ns, _tf_message(timestamp_ns, frame_id, child_frame_id, pose))
 
     def write_image(
         self, timestamp_ns: int, frame_id: str, channel_key: str,
         image_data: np.ndarray, encoding: str
     ) -> None:
-        """Writes Image (sensor_msgs/msg/Image) message."""
+        """Write a ``sensor_msgs/msg/Image`` message.
+
+        Args:
+            timestamp_ns: Message timestamp in nanoseconds.
+            frame_id: Header frame id.
+            channel_key: Registered MCAP channel key.
+            image_data: ``(H, W)`` or ``(H, W, C)`` numpy image.
+            encoding: ROS image encoding such as ``rgb8``, ``rgba8``,
+                ``32FC1``, or ``32SC1``.
+        """
         if image_data.ndim == 3:
             height, width, channels = image_data.shape
         else:
@@ -369,12 +455,19 @@ class McapExporter:
         angular_velocity: np.ndarray, linear_acceleration: np.ndarray,
         orientation: Optional[np.ndarray] = None
     ) -> None:
-        """
-        Writes an Imu (sensor_msgs/msg/Imu) message.
+        """Write a ``sensor_msgs/msg/Imu`` message.
 
         For a 6-axis IMU there is no orientation estimate: pass orientation=None
         and orientation_covariance[0] is set to -1 per ROS convention.
         Vectors are expected already in the target (ROS) frame.
+
+        Args:
+            timestamp_ns: Message timestamp in nanoseconds.
+            frame_id: Header frame id.
+            channel_key: Registered MCAP channel key.
+            angular_velocity: ROS-frame angular velocity vector, radians/sec.
+            linear_acceleration: ROS-frame acceleration vector, meters/sec^2.
+            orientation: Optional orientation quaternion ``[x, y, z, w]``.
         """
         zero_cov = [0.0] * 9
         if orientation is None:
@@ -395,7 +488,7 @@ class McapExporter:
         })
 
     def finish(self) -> None:
-        """Finishes writing and closes the file."""
+        """Finish writing and close the file."""
         if self.writer:
             self.writer.finish()
         if self.file:

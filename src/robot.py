@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 import tempfile
 import xml.etree.ElementTree as ET
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -42,12 +42,13 @@ DEFAULT_URDF = os.path.normpath(
 # ---------------------------------------------------------------------------
 # Small formatting / parsing helpers
 # ---------------------------------------------------------------------------
-def _vec(v) -> str:
+def _vec(v: List[float]) -> str:
     """Format a 3-vector as clean URDF text ('0 0 0.5', no trailing '.0')."""
     return " ".join(f"{float(x):g}" for x in v)
 
 
 def _floats(s: Optional[str]) -> List[float]:
+    """Parse a whitespace/comma separated 3-vector."""
     if not s:
         return [0.0, 0.0, 0.0]
     return [float(x) for x in s.replace(",", " ").split()]
@@ -56,7 +57,8 @@ def _floats(s: Optional[str]) -> List[float]:
 # ---------------------------------------------------------------------------
 # URDF generation (default cylinder body + arbitrary mount links)
 # ---------------------------------------------------------------------------
-def _mount_xml(m: dict) -> str:
+def _mount_xml(m: Dict[str, object]) -> str:
+    """Render one fixed mount link/joint block as URDF XML."""
     xyz = _vec(m["xyz"])
     rpy = _vec(m.get("rpy", [0, 0, 0]))
     name = m["name"]
@@ -75,13 +77,19 @@ def cylinder_urdf(
     radius: float = DEFAULT_RADIUS,
     lidar_height: Optional[float] = None,
     name: str = "cylinder_robot",
-    mounts: Optional[List[dict]] = None,
+    mounts: Optional[List[Dict[str, object]]] = None,
 ) -> str:
-    """Return URDF text for the cylinder robot (ROS Z-up convention).
+    """Return URDF text for the cylinder robot.
 
-    The body base sits on the floor plane (z in ``[0, height]``). ``mounts`` is a
-    list of ``{name, parent, xyz, rpy}`` sensor mount frames; when omitted, a single
-    ``lidar_link`` is placed at the top centre (``lidar_height``, default ``height``).
+    Args:
+        height: Cylinder height in metres.
+        radius: Cylinder radius in metres.
+        lidar_height: Legacy lidar mount height when ``mounts`` is omitted.
+        name: URDF robot name.
+        mounts: Optional fixed mount frame dictionaries.
+
+    Returns:
+        URDF XML text in ROS Z-up convention.
     """
     if mounts is None:
         lh = height if lidar_height is None else lidar_height
@@ -113,17 +121,19 @@ def cylinder_urdf(
 # ---------------------------------------------------------------------------
 # Frame extraction (URDF link tree -> TFManager dicts, Habitat Y-up)
 # ---------------------------------------------------------------------------
-def urdf_frames(urdf_text: str) -> List[dict]:
-    """Extract link frames from URDF text as ``TFManager`` link dicts (Habitat Y-up).
+def urdf_frames(urdf_text: str) -> List[Dict[str, object]]:
+    """Extract link frames from URDF text.
 
-    Each entry: ``{name, parent, position[xyz], orientation[xyzw]}`` where the
-    transform is relative to the parent link, converted from URDF Z-up to Habitat
-    Y-up. Root links (no parent joint) map to identity at the origin.
+    Args:
+        urdf_text: URDF XML text.
+
+    Returns:
+        ``TFManager`` link dictionaries in Habitat Y-up coordinates.
     """
     root = ET.fromstring(urdf_text)
     link_names = [l.get("name") for l in root.findall("link")]
 
-    joints = {}  # child link -> (parent, xyz, rpy)
+    joints: Dict[str, Tuple[str, List[float], List[float]]] = {}
     for j in root.findall("joint"):
         parent_el, child_el = j.find("parent"), j.find("child")
         if parent_el is None or child_el is None:
@@ -133,7 +143,7 @@ def urdf_frames(urdf_text: str) -> List[dict]:
         rpy = _floats(origin.get("rpy")) if origin is not None else [0.0, 0.0, 0.0]
         joints[child_el.get("link")] = (parent_el.get("link"), xyz, rpy)
 
-    frames: List[dict] = []
+    frames: List[Dict[str, object]] = []
     for nm in link_names:
         if nm in joints:
             parent, xyz, rpy = joints[nm]
@@ -173,13 +183,15 @@ def _root_link(root) -> "ET.Element":
     raise ValueError("URDF has no root link (cycle or empty).")
 
 
-def urdf_body_dims(urdf_text: str, base_dir: Optional[str] = None) -> tuple:
-    """``(height, radius)`` of the base link's body, derived from the URDF.
+def urdf_body_dims(urdf_text: str, base_dir: Optional[str] = None) -> Tuple[float, float]:
+    """Return the base link body dimensions from URDF.
 
-    The single source for the habitat agent capsule / navmesh: ``height`` is the
-    body's vertical extent and ``radius`` its footprint radius. Reads the base
-    link's ``<collision>`` (falling back to ``<visual>``) geometry — exact for
-    primitives, AABB-based for a ``<mesh>`` (path resolved relative to ``base_dir``).
+    Args:
+        urdf_text: URDF XML text.
+        base_dir: Optional base directory for resolving mesh paths.
+
+    Returns:
+        Pair ``(height, radius)`` in metres.
     """
     root = ET.fromstring(urdf_text)
     base = _root_link(root)
@@ -239,14 +251,19 @@ def add_robot(
     fixed_base: bool = True,
     **kwargs,
 ):
-    """Instantiate the robot in ``sim`` as an articulated object and return it.
+    """Instantiate the robot in ``sim`` as an articulated object.
 
-    If ``urdf`` (a file path) is given it is loaded directly; otherwise a cylinder
-    URDF is generated from ``height``/``radius`` and written to a temporary file.
-    Either way the object is created through habitat-sim's
-    ``add_articulated_object_from_urdf``, so the two paths are equivalent.
+    Args:
+        sim: Habitat simulator with physics enabled.
+        urdf: Optional URDF file path. If omitted, a cylinder URDF is generated.
+        height: Generated cylinder height.
+        radius: Generated cylinder radius.
+        lidar_height: Legacy lidar mount height for generated URDF.
+        fixed_base: Whether habitat should create a fixed-base articulated object.
+        **kwargs: Forwarded to habitat-sim's URDF loader.
 
-    Requires a Bullet-enabled build and a simulator created with physics enabled.
+    Returns:
+        The habitat-sim articulated object.
     """
     aom = sim.get_articulated_object_manager()
 

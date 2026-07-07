@@ -1,4 +1,5 @@
 from dataclasses import dataclass, asdict
+from typing import Dict
 
 
 @dataclass
@@ -15,7 +16,7 @@ class DifferentialDriveParams:
     angular_acceleration: float      # max angular acceleration [rad/s^2]
 
     @classmethod
-    def from_config(cls, config: dict) -> 'DifferentialDriveParams':
+    def from_config(cls, config: Dict[str, object]) -> 'DifferentialDriveParams':
         """
         Parses a configuration dictionary into a DifferentialDriveParams.
 
@@ -35,6 +36,6 @@ class DifferentialDriveParams:
             angular_acceleration=p_cfg.get("angular_acceleration", 2.0),
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, object]:
         """Converts dataclass back to a raw dictionary."""
         return asdict(self)

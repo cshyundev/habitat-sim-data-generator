@@ -2,7 +2,7 @@ import math
 import numpy as np
 import magnum as mn
 import habitat_sim
-from typing import Any, Optional, Dict
+from typing import Dict, Optional
 
 from src.sensors.base_sensor import BaseSensor
 from src.datatypes.image import RGBImage, DepthMap, SemanticMap, InstanceMap
@@ -21,6 +21,7 @@ from src.sensors.camera.models import (
 )
 from src.sensors.camera.remap import transition_camera_view
 from src.sensors.registry import register_sensor
+from src.raycasting.types import RaycastResult
 from src.utils.geometry import (
     compose_pose,
     quaternion_to_habitat_euler,
@@ -34,7 +35,7 @@ _HABITAT_NATIVE_RGB = {"pinhole", "equirectangular", "orthographic"}
 _PINHOLE_LIKE = {"pinhole", "perspective"}
 
 
-def _as_builtin(value):
+def _as_builtin(value: object) -> object:
     if isinstance(value, np.ndarray):
         return value.tolist()
     if isinstance(value, tuple):
@@ -66,7 +67,8 @@ class CameraSensor(BaseSensor):
     this class; SensorSuite wraps returned output payloads for export.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
+        """Initialize camera projection, outputs, and ray-cast state."""
         super().__init__(**kwargs)
 
         # BaseSensor stores the declared outputs as ``self.outputs``
@@ -131,7 +133,8 @@ class CameraSensor(BaseSensor):
         self._world_obbs = None
 
     @classmethod
-    def validate_outputs(cls, outputs: Dict[str, Any]) -> None:
+    def validate_outputs(cls, outputs: Dict[str, object]) -> None:
+        """Validate camera output names from sensor config."""
         allowed = {"rgb", "depth", "semantic", "instance", "bbox2d", "bbox3d"}
         unsupported = sorted(set(outputs) - allowed)
         if unsupported:
@@ -267,13 +270,16 @@ class CameraSensor(BaseSensor):
         # Cosine to optical axis (CV +Z) for planar z-depth conversion.
         self._ray_cos = rays_cv[2, :].astype(np.float64)
 
-    def calibration_dict(self) -> Dict[str, Any]:
-        """
-        Returns a sidecar-friendly calibration record for this camera.
+    def calibration_dict(self) -> Dict[str, object]:
+        """Build a sidecar-friendly calibration record for this camera.
 
         The project supports projection models that do not map cleanly onto
         ROS ``sensor_msgs/CameraInfo`` fields, so calibration is exported as
         structured YAML beside the MCAP rather than as a lossy ROS channel.
+
+        Returns:
+            YAML-safe mapping with camera identity, frame, projection model,
+            ranges, enabled outputs, and model-specific parameters.
         """
         cam = self.cam
         if cam is None and self.model != "orthographic":
@@ -302,6 +308,7 @@ class CameraSensor(BaseSensor):
     # BaseSensor interface
     # ------------------------------------------------------------------
     def is_native(self) -> bool:
+        """Return whether this camera contributes a native Habitat RGB sensor."""
         # RGB is rasterized by habitat (directly or via an equirect render source).
         # Depth/Semantic/Instance are ray-cast and therefore non-native.
         return self._has_output("rgb")
@@ -342,15 +349,23 @@ class CameraSensor(BaseSensor):
         self,
         sim: habitat_sim.Simulator,
         motion_state: MotionState,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, object]:
+        """Capture the configured camera outputs.
+
+        Args:
+            sim: Habitat simulator instance. RGB outputs read the native sensor
+                observation from this simulator.
+            motion_state: Robot state at the capture timestamp. Ray-cast outputs
+                use the pose to place camera rays in world coordinates.
+
+        Returns:
+            Mapping of configured output name to payload:
+            ``rgb`` -> ``RGBImage``; ``depth`` -> ``DepthMap``;
+            ``semantic`` -> ``SemanticMap``; ``instance`` -> ``InstanceMap``;
+            ``bbox2d`` -> ``List[Detection2D]``; ``bbox3d`` ->
+            ``Dict[str, List[OBB3D]]``.
         """
-        Returns output payloads keyed by configured camera output name:
-        - RGB: rasterized image (native, or remapped from equirect).
-        - Depth: float32 (H, W) planar z-depth or euclidean range.
-        - Semantic: (H, W) hit semantic_id (Class ID).
-        - Instance: (H, W) hit object_id (Instance ID).
-        """
-        outputs: Dict[str, Any] = {}
+        outputs: Dict[str, object] = {}
         if self._has_output("rgb"):
             outputs["rgb"] = self._observe_rgb(sim)
         if self._raycast_outputs:
@@ -373,10 +388,16 @@ class CameraSensor(BaseSensor):
     # ------------------------------------------------------------------
     # Ray casting (depth / semantic / instance, and reused by detections)
     # ------------------------------------------------------------------
-    def world_pose(self, motion_state: MotionState):
-        """This camera's world pose at ``motion_state`` -> (position xyz, quat xyzw).
+    def world_pose(self, motion_state: MotionState) -> tuple[np.ndarray, np.ndarray]:
+        """Compute this camera's world pose at ``motion_state``.
 
         position = agent_pos + R(agent) * mount_offset; orientation = R(agent) * R(offset).
+
+        Args:
+            motion_state: Robot state that owns the base pose.
+
+        Returns:
+            Tuple ``(position_xyz, quat_xyzw)`` in Habitat world coordinates.
         """
         agent_pos = np.asarray(motion_state.position, dtype=np.float64)
         q_agent_xyzw = np.asarray(motion_state.orientation, dtype=np.float64)
@@ -388,8 +409,20 @@ class CameraSensor(BaseSensor):
         )
         return sensor_pos_global, q_sensor_global_xyzw
 
-    def _cast(self, sim: habitat_sim.Simulator, motion_state: MotionState):
-        """Ray-cast the scene from this camera. Returns ``(RaycastResult, hit_mask[H*W])``."""
+    def _cast(
+        self, sim: habitat_sim.Simulator, motion_state: MotionState
+    ) -> tuple[RaycastResult, np.ndarray]:
+        """Ray-cast the scene from this camera.
+
+        Args:
+            sim: Habitat simulator instance, used only for fallback scene
+                extraction paths.
+            motion_state: Robot state used to compute the camera world pose.
+
+        Returns:
+            Tuple of batched raycast result and flat valid-hit mask of shape
+            ``(height * width,)``.
+        """
         if self.scene is None:
             raise RuntimeError("Camera raycast outputs require a Scene; no sim.cast_ray fallback is created.")
 
@@ -415,7 +448,16 @@ class CameraSensor(BaseSensor):
     def cast_ids(
         self, sim: habitat_sim.Simulator, motion_state: MotionState
     ) -> tuple[InstanceMap, SemanticMap]:
-        """One ray cast -> ``(object_id_map, semantic_id_map)``, both (H, W) uint32; 0 = no hit."""
+        """Cast camera rays and return instance and semantic id maps.
+
+        Args:
+            sim: Habitat simulator instance.
+            motion_state: Robot state used to compute the camera world pose.
+
+        Returns:
+            Tuple ``(instance_map, semantic_map)``; both are ``(H, W)`` uint32
+            arrays with ``0`` for no hit.
+        """
         res, hit = self._cast(sim, motion_state)
         obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(self.height, self.width)
         sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(self.height, self.width)
@@ -445,10 +487,10 @@ class CameraSensor(BaseSensor):
 
     def _observe_raycast(
         self, sim: habitat_sim.Simulator, motion_state: MotionState
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, object]:
         H, W = self.height, self.width
         res, hit = self._cast(sim, motion_state)
-        outputs: Dict[str, Any] = {}
+        outputs: Dict[str, object] = {}
         obj = None
         sem = None
 

@@ -23,7 +23,12 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
     position; orientation is left to the local planner). Dense motion sampling
     is the local planner's responsibility.
     """
-    def __init__(self, params: Optional[ZigzagCoverageParams] = None):
+    def __init__(self, params: Optional[ZigzagCoverageParams] = None) -> None:
+        """Initialize the planner.
+
+        Args:
+            params: Optional typed zigzag coverage parameters.
+        """
         self.params = params if params is not None else ZigzagCoverageParams()
 
     def plan(
@@ -76,9 +81,16 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
         height_offset: float = 0.0,
         **kwargs
     ) -> List[Waypoint]:
-        """
-        Plans coarse zigzag coverage waypoints directly from an OccupancyGrid2D
-        (no simulator needed -- e.g. for unit tests or PLY-loaded maps).
+        """Plan coarse zigzag waypoints directly from an occupancy grid.
+
+        Args:
+            occ_grid: 2D occupancy grid.
+            start_pose: Optional start pose used to choose the first cell.
+            height_offset: Habitat Y coordinate assigned to every waypoint.
+            **kwargs: Optional per-call overrides of params fields.
+
+        Returns:
+            Coarse world-frame waypoints.
         """
         p = self.params
         resolution = occ_grid.resolution

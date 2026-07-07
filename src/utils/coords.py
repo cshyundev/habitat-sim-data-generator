@@ -1,4 +1,6 @@
 import logging
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
 # pyrefly: ignore [missing-import]
 from src.datatypes.pose import Pose3D
@@ -17,12 +19,13 @@ _R_HAB_TO_ROS = np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]], dtype=np.float64)
 
 
 def habitat_to_ros_obb(obb: OBB3D) -> OBB3D:
-    """
-    Converts a world-frame OBB3D from Habitat coordinates to ROS coordinates.
+    """Convert a world-frame OBB3D from Habitat coordinates to ROS coordinates.
 
-    ``half_extents`` are intrinsic to the box's own local axes and are
-    unaffected by this world-frame change of basis; only ``center`` and
-    ``quat_xyzw`` change. Sets ``frame="map"`` on the result.
+    Args:
+        obb: Habitat-frame oriented bounding box.
+
+    Returns:
+        ROS-frame oriented bounding box with ``frame="map"``.
     """
     R_ros = _R_HAB_TO_ROS @ quaternion_to_matrix(obb.quat_xyzw)
     center_ros = _R_HAB_TO_ROS @ np.asarray(obb.center, dtype=np.float64)
@@ -39,65 +42,71 @@ def habitat_to_ros_obb(obb: OBB3D) -> OBB3D:
 
 
 def habitat_to_ros_pose(pose: Pose3D) -> Pose3D:
+    """Convert a Habitat-frame pose to ROS coordinates.
+
+    Args:
+        pose: Pose in Habitat coordinates.
+
+    Returns:
+        Equivalent pose in ROS coordinates.
+    """
     return Pose3D(
         position=habitat_to_ros_position(pose.position),
         orientation=habitat_to_ros_quaternion(pose.orientation)
     )
 
 def habitat_to_ros_position(p: np.ndarray) -> np.ndarray:
-    """
-    Converts a position from Habitat-sim coordinates to ROS 2 standard coordinates.
-    Habitat: Y-up, -Z-forward, X-right
-    ROS: Z-up, X-forward, Y-left
-    
-    Mapping:
-    X_ros = -Z_hab
-    Y_ros = -X_hab
-    Z_ros = Y_hab
+    """Convert a position from Habitat coordinates to ROS coordinates.
+
+    Args:
+        p: Habitat position ``[x, y, z]``.
+
+    Returns:
+        ROS position ``[x, y, z]``.
     """
     return np.array([-p[2], -p[0], p[1]], dtype=p.dtype)
 
 def habitat_to_ros_quaternion(q: np.ndarray) -> np.ndarray:
-    """
-    Converts a quaternion from Habitat-sim to ROS 2 standard coordinates.
-    Habitat and ROS quaternions are both in [x, y, z, w] format.
-    
-    Using the basis transformation:
-    X_ros = -Z_hab
-    Y_ros = -X_hab
-    Z_ros = Y_hab
-    
-    The quaternion vector part transforms the same way as coordinates:
-    qx_ros = -qz_hab
-    qy_ros = -qx_hab
-    qz_ros = qy_hab
-    qw_ros = qw_hab
+    """Convert a quaternion from Habitat coordinates to ROS coordinates.
+
+    Args:
+        q: Quaternion in ``[x, y, z, w]`` order.
+
+    Returns:
+        ROS-frame quaternion in ``[x, y, z, w]`` order.
     """
     return np.array([-q[2], -q[0], q[1], q[3]], dtype=q.dtype)
 
 def ros_to_habitat_position(p: np.ndarray) -> np.ndarray:
-    """
-    Converts a position from ROS/URDF coordinates to Habitat-sim. Inverse of
-    :func:`habitat_to_ros_position`.
+    """Convert a ROS/URDF position to Habitat coordinates.
 
-    ROS/URDF: Z-up, X-forward, Y-left  ->  Habitat: Y-up, -Z-forward, X-right
-        X_hab = -Y_ros,  Y_hab = Z_ros,  Z_hab = -X_ros
+    Args:
+        p: ROS position ``[x, y, z]``.
+
+    Returns:
+        Habitat position ``[x, y, z]``.
     """
     return np.array([-p[1], p[2], -p[0]], dtype=p.dtype)
 
 def ros_to_habitat_quaternion(q: np.ndarray) -> np.ndarray:
-    """
-    Converts a quaternion [x, y, z, w] from ROS/URDF to Habitat-sim. Inverse of
-    :func:`habitat_to_ros_quaternion`; the vector part transforms like a position
-    (the basis change is a proper rotation, so conjugating a rotation just
-    permutes the quaternion's vector part).
+    """Convert a ROS/URDF quaternion to Habitat coordinates.
+
+    Args:
+        q: Quaternion in ``[x, y, z, w]`` order.
+
+    Returns:
+        Habitat-frame quaternion in ``[x, y, z, w]`` order.
     """
     return np.array([-q[1], q[2], -q[0], q[3]], dtype=q.dtype)
 
 def habitat_to_ros_pointcloud(pc: np.ndarray) -> np.ndarray:
-    """
-    Converts an Nx3 pointcloud from Habitat-sim local/global coordinates
-    to ROS 2 standard coordinates.
+    """Convert an ``N x 3`` point cloud from Habitat to ROS coordinates.
+
+    Args:
+        pc: Point cloud in Habitat coordinates.
+
+    Returns:
+        Point cloud in ROS coordinates.
     """
     if pc.shape[0] == 0:
         return pc
@@ -109,12 +118,14 @@ def habitat_to_ros_pointcloud(pc: np.ndarray) -> np.ndarray:
     return ros_pc
 
 
-def convert_occupancy_grid_to_ros(occ_grid):
-    """
-    Converts a 2D occupancy grid from Simulator/Planner format to ROS 2 occupancy grid format.
-    ROS standard: 0: Free, 100: Occupied, -1: Unknown.
-    Also aligns the orientation and coordinate frame to ROS standard and flips the grid data
-    from image row-major (top-left row 0) to ROS row-major (bottom-left row 0).
+def convert_occupancy_grid_to_ros(occ_grid) -> Tuple[Pose3D, np.ndarray]:
+    """Convert an occupancy grid to ROS map-server conventions.
+
+    Args:
+        occ_grid: Simulator/planner occupancy grid.
+
+    Returns:
+        Pair of ROS-frame origin pose and ROS occupancy data.
     """
     from src.datatypes.map import GRID_2D_FREE, GRID_2D_OCCUPIED
     
@@ -133,7 +144,15 @@ def convert_occupancy_grid_to_ros(occ_grid):
     return origin_pose_ros, ros_map_data_flipped
 
 
-def parse_urdf_visuals(urdf_path):
+def parse_urdf_visuals(urdf_path: str) -> Dict[str, List[Dict[str, object]]]:
+    """Parse mesh visual entries from a URDF.
+
+    Args:
+        urdf_path: Absolute or relative URDF path.
+
+    Returns:
+        Mapping from link name to visual mesh descriptors.
+    """
     import xml.etree.ElementTree as ET
     try:
         tree = ET.parse(urdf_path)
@@ -142,10 +161,10 @@ def parse_urdf_visuals(urdf_path):
         logger.warning("Failed to parse URDF xml at %s: %s", urdf_path, e)
         return {}
     
-    link_visuals = {}
+    link_visuals: Dict[str, List[Dict[str, object]]] = {}
     for link in root.findall('link'):
         link_name = link.get('name')
-        visuals = []
+        visuals: List[Dict[str, object]] = []
         for visual in link.findall('visual'):
             origin_xyz = [0.0, 0.0, 0.0]
             origin_rpy = [0.0, 0.0, 0.0]
@@ -180,7 +199,16 @@ def parse_urdf_visuals(urdf_path):
     return link_visuals
 
 
-def resolve_urdf_path(urdf_rel, scene_dataset):
+def resolve_urdf_path(urdf_rel: str, scene_dataset: str) -> Optional[str]:
+    """Resolve a URDF path against known ReplicaCAD dataset locations.
+
+    Args:
+        urdf_rel: URDF path from habitat metadata.
+        scene_dataset: Scene dataset config path.
+
+    Returns:
+        Existing absolute path, or ``None`` when not found.
+    """
     import os
     real_dataset_dir = os.path.dirname(os.path.realpath(scene_dataset))
     path_attempts = [
@@ -199,14 +227,19 @@ def resolve_urdf_path(urdf_rel, scene_dataset):
     return None
 
 
-def extract_visual_map_as_markers(sim, scene_dataset_config_file: str) -> list:
-    """
-    Extracts the visual mesh of the stage, rigid objects, and articulated objects from the simulator,
-    transforms them into ROS standard coordinates, and returns a list of dictionaries
-    representing markers for visualization_msgs/msg/MarkerArray.
+def extract_visual_map_as_markers(
+    sim,
+    scene_dataset_config_file: str,
+) -> List[Dict[str, object]]:
+    """Extract visual scene geometry as marker dictionaries.
 
-    ``scene_dataset_config_file`` is the validated scene-dataset path (from
-    ``RuntimeConfig``), used to resolve mesh asset paths.
+    Args:
+        sim: Running habitat simulator.
+        scene_dataset_config_file: Validated scene-dataset config path used to
+            resolve mesh asset paths.
+
+    Returns:
+        Marker dictionaries compatible with the existing MCAP/export helpers.
     """
     import os
     import trimesh
@@ -214,7 +247,8 @@ def extract_visual_map_as_markers(sim, scene_dataset_config_file: str) -> list:
     scene_dataset = scene_dataset_config_file
     active_stage_attr = sim.get_stage_initialization_template()
     
-    def resolve_mesh_path(handle):
+    def resolve_mesh_path(handle: str) -> str:
+        """Resolve a mesh asset handle against the dataset directory."""
         real_dataset_dir = os.path.dirname(os.path.realpath(scene_dataset))
         clean_handle = handle
         if clean_handle.startswith("../../"):
@@ -222,7 +256,7 @@ def extract_visual_map_as_markers(sim, scene_dataset_config_file: str) -> list:
         return os.path.abspath(os.path.join(real_dataset_dir, clean_handle))
         
     stage_path = resolve_mesh_path(active_stage_attr.render_asset_handle)
-    markers_list = []
+    markers_list: List[Dict[str, object]] = []
     marker_id_counter = 0
     
     # 1. Load stage mesh

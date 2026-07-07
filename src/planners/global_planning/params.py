@@ -1,4 +1,5 @@
 from dataclasses import dataclass, asdict
+from typing import Dict
 
 
 @dataclass
@@ -18,7 +19,7 @@ class ZigzagCoverageParams:
     start_corner: str = "bottom_left"
 
     @classmethod
-    def from_config(cls, config: dict) -> 'ZigzagCoverageParams':
+    def from_config(cls, config: Dict[str, object]) -> 'ZigzagCoverageParams':
         """Parses zigzag params from new or legacy planner config."""
         planner_cfg = config.get("planner", {}) or {}
         if isinstance(planner_cfg, dict) and "global" in planner_cfg:
@@ -33,6 +34,6 @@ class ZigzagCoverageParams:
             start_corner=p_cfg.get("start_corner", "bottom_left"),
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, object]:
         """Converts dataclass back to a raw dictionary."""
         return asdict(self)

@@ -8,7 +8,7 @@ backend (data generation) and frontends (export, visualization) decoupled.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Dict, List, Optional, Protocol
 
 from src.datatypes.motion_state import MotionState
 from src.datatypes.pose import Pose3D
@@ -16,9 +16,12 @@ from src.sensors.base_sensor import BaseSensor
 
 
 class TFProvider(Protocol):
-    links: Dict[str, dict]
+    """Minimal transform-manager interface required by pipeline sinks."""
+
+    links: Dict[str, Dict[str, object]]
 
     def get_relative_pose(self, from_frame: str, to_frame: str) -> Pose3D:
+        """Return ``to_frame`` pose expressed relative to ``from_frame``."""
         ...
 
 
@@ -28,17 +31,26 @@ class StreamContext:
     scene_markers: List[dict]
     tf_manager: TFProvider
     sensors: List[BaseSensor]
-    sensor_outputs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    artifacts: Dict[str, Any] = field(default_factory=dict)
+    sensor_outputs: Dict[str, Dict[str, object]] = field(default_factory=dict)
+    artifacts: Dict[str, object] = field(default_factory=dict)
     category_names: Optional[Dict[int, str]] = None
 
 
 @dataclass
 class StreamEvent:
-    """A single capture event (one or more sensors firing at the same instant)."""
+    """A single capture event with one or more sensors firing at the same time.
+
+    Attributes:
+        timestamp_ns: Event timestamp in nanoseconds.
+        motion_state: Robot state at ``timestamp_ns``.
+        observations: Mapping of sensor name to output payloads. Inner mappings
+            are keyed by declared output name and contain the existing sensor
+            datatypes or camera image aliases.
+        firing_sensors: Sensors scheduled at ``timestamp_ns``.
+    """
     timestamp_ns: int
     motion_state: MotionState
-    observations: Dict[str, Dict[str, Any]]
+    observations: Dict[str, Dict[str, object]]
     firing_sensors: List[BaseSensor]
 
 

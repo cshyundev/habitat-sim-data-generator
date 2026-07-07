@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import Dict, TYPE_CHECKING, Optional
 
 import numpy as np
 import magnum as mn
@@ -69,10 +69,12 @@ class SimRaycastBackend(RaycastBackend):
     ``semantic_id`` by query-mapping object IDs from the active simulator scene."""
 
     def __init__(self) -> None:
-        self._sim = None
-        self._obj_id_to_sem_id = {}
+        """Initialize an unbound habitat-sim CPU ray-casting backend."""
+        self._sim: Optional[habitat_sim.Simulator] = None
+        self._obj_id_to_sem_id: Dict[int, int] = {}
 
-    def bind(self, sim) -> None:
+    def bind(self, sim: habitat_sim.Simulator) -> None:
+        """Cache the simulator and build object-id to semantic-id lookup."""
         self._sim = sim
         self._obj_id_to_sem_id = {0: 0}  # stage_id (0) maps to semantic_id 0
         if sim is not None:
@@ -98,7 +100,24 @@ class SimRaycastBackend(RaycastBackend):
             except Exception as exc:
                 logger.debug("Articulated-object semantic lookup unavailable: %s", exc)
 
-    def cast_rays(self, origins, directions, min_distance=0.0, max_distance=float("inf")):
+    def cast_rays(
+        self,
+        origins: np.ndarray,
+        directions: np.ndarray,
+        min_distance: float = 0.0,
+        max_distance: float = float("inf"),
+    ) -> RaycastResult:
+        """Intersect rays with habitat-sim's built-in CPU ray caster.
+
+        Args:
+            origins: Ray origins as ``float[N, 3]``.
+            directions: Ray directions as ``float[N, 3]``.
+            min_distance: Hits closer than this are ignored.
+            max_distance: Maximum ray distance.
+
+        Returns:
+            Batched ray-cast result.
+        """
         if self._sim is None:
             raise RuntimeError("SimRaycastBackend.cast_rays called before bind(sim)")
         origins = np.ascontiguousarray(origins, dtype=np.float64)

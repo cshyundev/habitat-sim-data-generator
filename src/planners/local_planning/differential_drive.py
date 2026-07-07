@@ -37,22 +37,28 @@ class _Primitive:
 
 
 class DifferentialDriveLocalPlanner(BaseLocalPlanner):
-    """
-    Local planner for a differential-drive (unicycle) mobile robot using a
-    decoupled Rotate-Translate-Rotate (RTR) strategy: only one motion at a
-    time -- an in-place point turn to face the next waypoint, then a straight
-    drive. Each primitive uses a trapezoidal velocity profile so the resulting
-    velocity and acceleration are finite and continuous, suitable for IMU
-    simulation.
+    """Local planner for a differential-drive mobile robot.
 
-    Geometry convention (Habitat): forward heading yaw = atan2(-dx, -dz),
-    planar motion at constant height, yaw about the +Y axis.
+    Uses a decoupled rotate-translate-rotate strategy. Each primitive uses a
+    trapezoidal velocity profile so velocity and acceleration remain finite for
+    IMU simulation.
+
+    Args:
+        params: Typed planner parameters. If omitted, legacy keyword defaults are
+            accepted for backward compatibility.
+        **kwargs: Legacy velocity/acceleration overrides.
     """
     def __init__(
         self,
         params: Optional[DifferentialDriveParams] = None,
         **kwargs,
-    ):
+    ) -> None:
+        """Initialize the local planner.
+
+        Args:
+            params: Optional typed differential-drive parameters.
+            **kwargs: Legacy parameter overrides used when ``params`` is omitted.
+        """
         if params is None:
             params = DifferentialDriveParams(
                 linear_velocity=kwargs.get("linear_velocity", 0.3),
@@ -69,6 +75,7 @@ class DifferentialDriveLocalPlanner(BaseLocalPlanner):
 
     @property
     def duration_ns(self) -> int:
+        """Total planned trajectory duration in nanoseconds."""
         return self._duration_ns
 
     def set_waypoints(
@@ -76,6 +83,12 @@ class DifferentialDriveLocalPlanner(BaseLocalPlanner):
         waypoints: List[Waypoint],
         start_pose: Optional[Pose3D] = None,
     ) -> None:
+        """Build the primitive sequence for a waypoint path.
+
+        Args:
+            waypoints: Coarse world-frame waypoints.
+            start_pose: Optional initial pose used to seed the first yaw.
+        """
         self._primitives = []
         self._duration_ns = 0
 
@@ -154,6 +167,14 @@ class DifferentialDriveLocalPlanner(BaseLocalPlanner):
         self._duration_ns = time_cursor_ns
 
     def update(self, timestamp_ns: int) -> MotionState:
+        """Sample the planned motion at a timestamp.
+
+        Args:
+            timestamp_ns: Nanoseconds from the start of the local plan.
+
+        Returns:
+            Motion state at the clamped timestamp.
+        """
         if not self._primitives:
             # No motion: report a resting state at the home pose.
             return self._rest_state(self._home_position, self._home_yaw, timestamp_ns)
@@ -199,6 +220,7 @@ class DifferentialDriveLocalPlanner(BaseLocalPlanner):
         )
 
     def _rest_state(self, position: np.ndarray, yaw: float, timestamp_ns: int) -> MotionState:
+        """Return a zero-velocity state at the given pose."""
         return MotionState(
             position=np.array(position, dtype=np.float32),
             orientation=yaw_to_quaternion(yaw),
@@ -209,9 +231,16 @@ class DifferentialDriveLocalPlanner(BaseLocalPlanner):
         )
 
     def sample_trajectory(self, dt_ns: int) -> List[MotionState]:
-        """
-        Samples the full trajectory at a fixed time step (inclusive of the end).
-        Useful for integration into the sim loop and for tests/visualization.
+        """Sample the full trajectory at a fixed timestep.
+
+        Args:
+            dt_ns: Sampling period in nanoseconds.
+
+        Returns:
+            Motion states from ``t=0`` through the final timestamp.
+
+        Raises:
+            ValueError: If ``dt_ns`` is not positive.
         """
         if dt_ns <= 0:
             raise ValueError(f"dt_ns must be > 0, got {dt_ns}")
