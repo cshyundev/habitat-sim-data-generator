@@ -143,19 +143,20 @@ sensor. `tests/test_imu_sensor.py` supplies a real (identity) `TFManager` via a
 ## P3 — Dead code / stale artifacts (safe to delete now)
 
 ### 12. Unused modules and helpers
-- `src/utils/visualization.py` (81 lines) — imported by nothing.
+- `src/utils/visualization.py` (81 lines) — imported by nothing. — DONE
 - `src/utils/io.py` (74 lines) — used only by its own `tests/test_io.py`;
-  no pipeline code writes pose CSVs. Delete both (or keep with a real consumer).
+  no pipeline code writes pose CSVs. Delete both (or keep with a real consumer). — DONE
 - `tests/run_test.py` — imports nonexistent `tests.test_refactoring`, mocks
-  `coverage`, hardcodes `.venv/lib/python3.10` (venv is 3.11). Cannot run.
+  `coverage`, hardcodes `.venv/lib/python3.10` (venv is 3.11). Cannot run. — DONE
 - `src/datatypes/image.py` NewTypes (`RGBImage`, `DepthMap`, `SemanticMap`,
-  `InstanceMap`) — only re-exported from `__init__`, never referenced. Note:
+  `InstanceMap`) — were only re-exported from `__init__`, never referenced. Note:
   TODO Round 1 item 10 claimed `src/datatypes/observation.py` was added; that
   file does not exist — the record overstated what landed. Either use the
-  aliases in sensor/sink signatures or delete them.
+  aliases in sensor/sink signatures or delete them. — DONE (kept as camera
+  output aliases)
 - `RaycastResult.range_image()` / `semantic_image()`
-  (`src/raycasting/types.py`) — sensors reshape manually; unused.
-- `BaseLocalPlanner.is_finished()` — unused.
+  (`src/raycasting/types.py`) — sensors reshape manually; unused. — DONE
+- `BaseLocalPlanner.is_finished()` — unused. — DONE
 
 ### 13. Config/doc leftovers
 - `config_stream.yaml` `robot.base_link:` key — read by nothing ("base_link"

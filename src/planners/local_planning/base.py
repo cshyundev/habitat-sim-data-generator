@@ -49,7 +49,3 @@ class BaseLocalPlanner(ABC):
     def duration_ns(self) -> int:
         """Total duration of the planned trajectory in nanoseconds."""
         pass
-
-    def is_finished(self, timestamp_ns: int) -> bool:
-        """Whether the given time is at or past the end of the trajectory."""
-        return timestamp_ns >= self.duration_ns

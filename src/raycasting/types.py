@@ -82,13 +82,3 @@ class RaycastResult:
             self.object_id[too_close] = NO_HIT_OBJECT_ID
             self.semantic_id[too_close] = NO_HIT_OBJECT_ID
         return self
-
-    def range_image(self, height: int, width: int) -> np.ndarray:
-        """Reshape ``distance`` to an ``(H, W)`` float32 range image (``+inf`` = miss),
-        matching ``IdealLiDAR3D`` row-major (altitude, azimuth) ray ordering."""
-        return self.distance.reshape(height, width).astype(np.float32)
-
-    def semantic_image(self, height: int, width: int) -> np.ndarray:
-        """Reshape ``object_id`` to an ``(H, W)`` uint32 semantic image, matching the
-        sensors which store ``hit.object_id`` into the semantic buffer."""
-        return self.object_id.reshape(height, width).astype(np.uint32)

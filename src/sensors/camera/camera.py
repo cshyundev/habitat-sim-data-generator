@@ -5,6 +5,7 @@ import habitat_sim
 from typing import Any, Optional, Dict
 
 from src.sensors.base_sensor import BaseSensor
+from src.datatypes.image import RGBImage, DepthMap, SemanticMap, InstanceMap
 from src.datatypes.motion_state import MotionState
 from src.detections.obb import global_obbs
 from src.detections.bbox2d import boxes_from_maps
@@ -359,15 +360,15 @@ class CameraSensor(BaseSensor):
     # ------------------------------------------------------------------
     # RGB
     # ------------------------------------------------------------------
-    def _observe_rgb(self, sim: habitat_sim.Simulator) -> np.ndarray:
+    def _observe_rgb(self, sim: habitat_sim.Simulator) -> RGBImage:
         obs = sim.get_sensor_observations()
         if self.name not in obs:
-            return np.empty((0, 0), dtype=np.uint8)
+            return RGBImage(np.empty((0, 0), dtype=np.uint8))
         image = obs[self.name]
         if not self.needs_remap:
-            return image
+            return RGBImage(image)
         # Remap the equirectangular render to the target camera model.
-        return transition_camera_view(image, self.src_cam, self.cam)
+        return RGBImage(transition_camera_view(image, self.src_cam, self.cam))
 
     # ------------------------------------------------------------------
     # Ray casting (depth / semantic / instance, and reused by detections)
@@ -411,12 +412,14 @@ class CameraSensor(BaseSensor):
         )
         return res, (res.hit & self._ray_valid)
 
-    def cast_ids(self, sim: habitat_sim.Simulator, motion_state: MotionState):
+    def cast_ids(
+        self, sim: habitat_sim.Simulator, motion_state: MotionState
+    ) -> tuple[InstanceMap, SemanticMap]:
         """One ray cast -> ``(object_id_map, semantic_id_map)``, both (H, W) uint32; 0 = no hit."""
         res, hit = self._cast(sim, motion_state)
         obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(self.height, self.width)
         sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(self.height, self.width)
-        return obj, sem
+        return InstanceMap(obj), SemanticMap(sem)
 
     def _ensure_detection_context(self, sim: habitat_sim.Simulator) -> None:
         categories = self.scene.categories
@@ -453,7 +456,7 @@ class CameraSensor(BaseSensor):
             dist = np.where(hit, res.distance, 0.0).astype(np.float32)
             if self.depth_type == "planar":
                 dist = (dist * self._ray_cos).astype(np.float32)
-            outputs["depth"] = dist.reshape(H, W)
+            outputs["depth"] = DepthMap(dist.reshape(H, W))
 
         needs_semantic = self._has_output("semantic") or self._has_output("bbox2d")
         if needs_semantic:
@@ -470,12 +473,12 @@ class CameraSensor(BaseSensor):
         if self._has_output("semantic"):
             if sem is None:
                 sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(H, W)
-            outputs["semantic"] = sem
+            outputs["semantic"] = SemanticMap(sem)
 
         if self._has_output("instance"):
             if obj is None:
                 obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(H, W)
-            outputs["instance"] = obj
+            outputs["instance"] = InstanceMap(obj)
 
         if self._has_output("bbox2d"):
             if sem is None:
