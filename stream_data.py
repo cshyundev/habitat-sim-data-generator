@@ -14,7 +14,6 @@ import argparse
 import logging
 import yaml
 
-from src.robot_config import load_robot
 from src.runtime_config import validate_runtime_config
 from src.sensors.suite import SensorSuite
 from src.simulator.factory import create_simulator
@@ -42,21 +41,25 @@ def main():
     args = parse_args()
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
+    # The raw dict is consumed only here: this single boundary parses, validates,
+    # and normalizes everything (scene/planner/raycasting/mcap_export + the robot
+    # model). Nothing downstream sees the dict -- typed slices flow from here.
     runtime_config = validate_runtime_config(config)
 
     logger.info("1. Initialize Sensor...")
-    robot = load_robot(config)
-    sensor_suite = SensorSuite(robot, config)
+    sensor_suite = SensorSuite(runtime_config.robot, runtime_config.raycasting)
 
     logger.info("2. Initialize habitat simulator (Scene: %s)...", runtime_config.scene_id)
-    sim = create_simulator(config, robot, sensor_suite)
+    sim = create_simulator(
+        runtime_config.scene_dataset_config_file,
+        runtime_config.scene_id,
+        runtime_config.robot,
+        sensor_suite,
+    )
 
     try:
         logger.info("3. Build Data Pipeline...")
-        pipeline = build_pipeline(
-            config, sim, sensor_suite,
-            max_duration_ns=runtime_config.max_duration_ns,
-        )
+        pipeline = build_pipeline(runtime_config, sim, sensor_suite)
         logger.info("   - length of trajectory: %.2fs", pipeline.duration_ns / 1e9)
 
         sinks = []
@@ -64,7 +67,7 @@ def main():
             output_dir = runtime_config.output_dir
             os.makedirs(output_dir, exist_ok=True)
             mcap_path = os.path.join(output_dir, runtime_config.output_filename)
-            sinks.append(McapSink(mcap_path, config))
+            sinks.append(McapSink(mcap_path, runtime_config.mcap_export))
             logger.info("   - MCAP Output Path: %s", mcap_path)
 
         if args.visualize:

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
-from src.robot_config import ConfigError
+from src.robot_config import ConfigError, RobotBundle, load_robot
 
 
 def _unknown_keys(section: dict, allowed: set[str], ctx: str) -> None:
@@ -142,8 +142,16 @@ class McapExportConfig:
 
 @dataclass(frozen=True)
 class PlannerConfig:
+    """Fully-parsed planner slice: the chosen types plus their typed params.
+
+    Parsed once here at the boundary so downstream code (``build_planners``)
+    never touches the raw dict — it builds directly from ``global_params`` /
+    ``local_params``."""
+
     global_type: str
     local_type: str
+    global_params: Any
+    local_params: Any
 
     @classmethod
     def from_config(cls, config: dict) -> "PlannerConfig":
@@ -152,6 +160,8 @@ class PlannerConfig:
             available_local_planners,
             global_planner_type,
             local_planner_type,
+            parse_global_params,
+            parse_local_params,
         )
 
         global_type = global_planner_type(config)
@@ -166,7 +176,12 @@ class PlannerConfig:
                 f"planner.local.type: unknown '{local_type}'. "
                 f"Available: {list(available_local_planners())}"
             )
-        return cls(global_type=global_type, local_type=local_type)
+        return cls(
+            global_type=global_type,
+            local_type=local_type,
+            global_params=parse_global_params(config),
+            local_params=parse_local_params(config),
+        )
 
 
 @dataclass(frozen=True)
@@ -220,6 +235,7 @@ class RuntimeConfig:
     planner: PlannerConfig
     raycasting: RaycastingConfig
     mcap_export: McapExportConfig
+    robot: RobotBundle  # loaded robot structure (URDF frames, body dims, sensor specs)
 
     @property
     def max_duration_ns(self) -> Optional[int]:
@@ -269,6 +285,9 @@ class RuntimeConfig:
             planner=PlannerConfig.from_config(config),
             raycasting=RaycastingConfig.from_config(config),
             mcap_export=mcap_export,
+            # Loaded last: value errors above raise before any robot file IO, so
+            # the config document can be validated independently of the robot.
+            robot=load_robot(config),
         )
 
 

@@ -3,23 +3,27 @@ from src.sensors.suite import SensorSuite
 from src.robot_config import RobotBundle
 
 def create_simulator(
-    config: dict, robot: RobotBundle, sensor_suite: SensorSuite
+    scene_dataset_config_file: str,
+    scene_id: str,
+    robot: RobotBundle,
+    sensor_suite: SensorSuite,
 ) -> habitat_sim.Simulator:
     """
     Initializes and returns a habitat-sim Simulator instance, configuring
     scenes, physics settings, and embedding native sensor specifications.
 
     Args:
-        config: Full configuration dictionary.
+        scene_dataset_config_file: Validated scene-dataset path (the scene slice,
+            from ``RuntimeConfig`` -- not re-read from a raw dict).
+        scene_id: Validated scene id.
         robot: Validated RobotBundle supplying the body dimensions (agent capsule).
         sensor_suite: Instantiated SensorSuite providing native sensor specs.
 
     Returns:
         habitat_sim.Simulator instance.
     """
-    scene_dataset = config["scene_dataset_config_file"]
-    scene_id = config["scene_id"]
-    
+    scene_dataset = scene_dataset_config_file
+
     sim_cfg = habitat_sim.SimulatorConfiguration()
     sim_cfg.scene_dataset_config_file = scene_dataset
     sim_cfg.scene_id = scene_id

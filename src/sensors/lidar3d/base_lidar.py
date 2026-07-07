@@ -19,7 +19,6 @@ class LiDAR3D(BaseSensor, abc.ABC):
         parameters: dict,
         tf_manager: Any,
         scene: Any = None,
-        config: Optional[dict] = None,
         output_names: Optional[list] = None,
         output_params: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
@@ -34,7 +33,6 @@ class LiDAR3D(BaseSensor, abc.ABC):
             parameters=parameters,
             tf_manager=tf_manager,
             scene=scene,
-            config=config,
             output_names=output_names,
             output_params=output_params,
         )

@@ -11,6 +11,7 @@ from mcap.reader import make_reader
 from mcap_ros2.decoder import DecoderFactory
 
 from src.utils.export import McapExporter
+from src.runtime_config import McapExportConfig
 from src.pipeline.mcap_sink import McapSink, collect_calibrations, write_sidecar_yaml, _sidecar_path
 from src.pipeline.sink import StreamContext
 from src.datatypes.pose import Pose3D
@@ -40,7 +41,7 @@ class TestMcapExportRoundTrip(unittest.TestCase):
         os.remove(self.path)
 
     def _write_sample_file(self):
-        exp = McapExporter(self.path, _CHANNELS_CONFIG)
+        exp = McapExporter(self.path, McapExportConfig.from_config(_CHANNELS_CONFIG))
         exp.start()
         exp.register_channel_dynamic("camera_rgb", "/camera/rgb", "sensor_msgs/msg/Image")
         exp.register_channel_dynamic("imu", "/imu", "sensor_msgs/msg/Imu")
@@ -224,7 +225,7 @@ class TestMcapSinkMapExport(unittest.TestCase):
     def test_registers_sensor_output_channels(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "sample.mcap")
-            sink = McapSink(path, {
+            sink = McapSink(path, McapExportConfig.from_config({
                 "mcap_export": {
                     "channels": {
                         "cam": {
@@ -239,9 +240,8 @@ class TestMcapSinkMapExport(unittest.TestCase):
                         }
                     },
                 }
-            })
+            }))
             ctx = StreamContext(
-                config={},
                 scene_markers=[],
                 tf_manager=_FakeTFManager(),
                 sensors=[_FakeCamera()],
@@ -260,9 +260,13 @@ class TestMcapSinkMapExport(unittest.TestCase):
     def test_export_map_true_without_occ_grid_warns_and_skips(self):
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "sample.mcap")
-            sink = McapSink(path, {"mcap_export": {"export_map": True, "channels": {}}})
+            sink = McapSink(
+                path,
+                McapExportConfig.from_config(
+                    {"mcap_export": {"export_map": True, "channels": {}}}
+                ),
+            )
             ctx = StreamContext(
-                config={},
                 scene_markers=[],
                 tf_manager=_FakeTFManager(),
                 sensors=[],

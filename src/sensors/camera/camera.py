@@ -74,7 +74,6 @@ class CameraSensor(BaseSensor):
         parameters: dict,
         tf_manager: Any,
         scene: Any = None,
-        config: Optional[dict] = None,
         output_names: Optional[list] = None,
         output_params: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
@@ -86,7 +85,6 @@ class CameraSensor(BaseSensor):
             parameters=parameters,
             tf_manager=tf_manager,
             scene=scene,
-            config=config,
             output_names=output_names,
             output_params=output_params,
         )
@@ -455,10 +453,8 @@ class CameraSensor(BaseSensor):
             scene_model = self.scene.model
             if scene_model is None:
                 from src.raycasting import extract_scene_model
-                from src.runtime_config import RaycastingConfig
 
-                geometry = RaycastingConfig.from_config(self.config).geometry
-                scene_model = extract_scene_model(sim, geometry)
+                scene_model = extract_scene_model(sim, self.scene.geometry)
             self._world_obbs = global_obbs(scene_model, categories)
 
     def _bbox2d_min_box_px(self) -> int:

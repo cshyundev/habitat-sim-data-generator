@@ -86,16 +86,15 @@ def write_sidecar_yaml(path: str, payload: dict) -> None:
 class McapSink(StreamSink):
     """Writes pose, TF, scene, optional occupancy grid, and sensor data to MCAP."""
 
-    def __init__(self, mcap_path: str, config: dict):
+    def __init__(self, mcap_path: str, export_config: McapExportConfig):
         self.mcap_path = mcap_path
-        self.config = config
+        self.export_config = export_config
         self.exporter = None
 
     def on_start(self, ctx: StreamContext) -> None:
-        self.exporter = McapExporter(self.mcap_path, self.config)
+        self.exporter = McapExporter(self.mcap_path, self.export_config)
         self.exporter.start()
-        # Reuse the config the exporter already parsed in start() (parse once).
-        export_config = self.exporter.export_config
+        export_config = self.export_config
         sensor_channels = _resolve_sensor_channels(ctx, export_config)
 
         # Dynamic sensor output channels.
@@ -116,7 +115,6 @@ class McapSink(StreamSink):
             {
                 "format": "habitat-sim-data-generator.metadata.v1",
                 "semantic_categories": ctx.category_names or {},
-                "config_snapshot": ctx.config,
             },
         )
 

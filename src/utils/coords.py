@@ -199,16 +199,19 @@ def resolve_urdf_path(urdf_rel, scene_dataset):
     return None
 
 
-def extract_visual_map_as_markers(sim, config) -> list:
+def extract_visual_map_as_markers(sim, scene_dataset_config_file: str) -> list:
     """
     Extracts the visual mesh of the stage, rigid objects, and articulated objects from the simulator,
     transforms them into ROS standard coordinates, and returns a list of dictionaries
     representing markers for visualization_msgs/msg/MarkerArray.
+
+    ``scene_dataset_config_file`` is the validated scene-dataset path (from
+    ``RuntimeConfig``), used to resolve mesh asset paths.
     """
     import os
     import trimesh
-    
-    scene_dataset = config["scene_dataset_config_file"]
+
+    scene_dataset = scene_dataset_config_file
     active_stage_attr = sim.get_stage_initialization_template()
     
     def resolve_mesh_path(handle):

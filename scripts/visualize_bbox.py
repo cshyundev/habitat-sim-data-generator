@@ -27,6 +27,7 @@ from src.datatypes.pose import Pose3D  # noqa: E402
 from src.detections import boxes_from_maps, obbs_for_visible, global_obbs, build_category_names  # noqa: E402
 from src.raycasting import extract_scene_model  # noqa: E402
 from src.robot_config import load_robot  # noqa: E402
+from src.runtime_config import RaycastingConfig  # noqa: E402
 from src.sensors.suite import SensorSuite  # noqa: E402
 from src.simulator.factory import create_simulator  # noqa: E402
 from src.utils.geometry import quaternion_to_matrix, yaw_to_quaternion  # noqa: E402
@@ -81,8 +82,10 @@ def main():
         config = yaml.safe_load(f)
     det_cfg = config["detections"]
     robot = load_robot(config)
-    suite = SensorSuite(robot, config)
-    sim = create_simulator(config, robot, suite)
+    suite = SensorSuite(robot, RaycastingConfig.from_config(config))
+    sim = create_simulator(
+        config["scene_dataset_config_file"], config["scene_id"], robot, suite
+    )
 
     inst_cam = _find(suite, name=det_cfg["bbox2d"]["camera"])
     rgb_cam = _find(suite, modality="rgb")

@@ -25,6 +25,7 @@ import numpy as np
 from src.raycasting.backend import build_backend
 from src.raycasting.scene import SceneModel
 from src.raycasting.types import RaycastResult
+from src.runtime_config import RaycastingConfig
 from src.detections.categories import build_category_names
 
 
@@ -36,8 +37,9 @@ class Scene:
     then :meth:`cast_rays` per sensor.
     """
 
-    def __init__(self, config: Optional[dict] = None):
-        self._backend = build_backend(config or {})
+    def __init__(self, raycasting: RaycastingConfig):
+        self._backend = build_backend(raycasting)
+        self._geometry = raycasting.geometry
         self._categories: Optional[Dict[int, str]] = None
 
     # ------------------------------------------------------------------
@@ -73,3 +75,10 @@ class Scene:
     def categories(self) -> Optional[Dict[int, str]]:
         """Semantic ``class_id -> name`` table, or ``None`` before :meth:`bind`."""
         return self._categories
+
+    @property
+    def geometry(self) -> str:
+        """Which mesh set the backend ray-casts against (``collision`` or
+        ``visual``) -- the camera reuses it to extract bbox3d geometry for the
+        ``sim`` backend, which holds no :attr:`model`."""
+        return self._geometry

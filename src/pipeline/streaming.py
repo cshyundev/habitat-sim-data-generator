@@ -17,7 +17,8 @@ from src.utils.coords import extract_visual_map_as_markers
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
 from src.planners.global_planning import BaseGlobalPlanner
 from src.planners.local_planning import BaseLocalPlanner
-from src.planners.registry import create_global_planner, create_local_planner
+from src.planners.registry import build_planners
+from src.runtime_config import RuntimeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,6 @@ class StreamingPipeline:
 
     def __init__(
         self,
-        config: dict,
         sim: habitat_sim.Simulator,
         sensor_suite: SensorSuite,
         global_planner: BaseGlobalPlanner,
@@ -46,7 +46,6 @@ class StreamingPipeline:
         category_names=None,
         max_duration_ns: Optional[int] = None,
     ):
-        self.config = config
         self.sim = sim
         self.sensor_suite = sensor_suite
         self.global_planner = global_planner
@@ -87,7 +86,6 @@ class StreamingPipeline:
         try:
             for sink in sinks:
                 sink.on_start(StreamContext(
-                    config=self.config,
                     scene_markers=self.scene_markers,
                     tf_manager=self.sensor_suite.tf_manager,
                     sensors=self.sensor_suite.sensors,
@@ -130,38 +128,38 @@ class StreamingPipeline:
 
 
 def build_pipeline(
-    config: dict,
+    runtime_config: RuntimeConfig,
     sim: habitat_sim.Simulator,
     sensor_suite: SensorSuite,
-    max_duration_ns: Optional[int] = None,
 ) -> StreamingPipeline:
     """
     Wires configured planners, scene context, and detector jobs into a ready-to-run
     StreamingPipeline.
 
     Args:
-        max_duration_ns: Optional trajectory cap (already validated by
-            ``RuntimeConfig`` at the entry point); the pipeline does not re-parse it.
+        runtime_config: Validated config (parsed once at the entry point). Planners,
+            the trajectory cap, and the scene-dataset path are read from its typed
+            slices -- the pipeline never sees the raw dict.
 
     Raises:
         RuntimeError: if the global planner produced no waypoints.
     """
-    global_planner = create_global_planner(config)
-    local_planner = create_local_planner(config)
+    global_planner, local_planner = build_planners(runtime_config.planner)
 
-    scene_markers = extract_visual_map_as_markers(sim, config)
+    scene_markers = extract_visual_map_as_markers(
+        sim, runtime_config.scene_dataset_config_file
+    )
     # The category table is owned by the shared Scene (built once when it was
     # bound to the sim); read it here for the MCAP metadata sidecar. Sensors read
     # it straight off the Scene, so nothing is injected per sensor.
     categories = sensor_suite.scene.categories or {}
 
     return StreamingPipeline(
-        config=config,
         sim=sim,
         sensor_suite=sensor_suite,
         global_planner=global_planner,
         local_planner=local_planner,
         scene_markers=scene_markers,
         category_names=categories,
-        max_duration_ns=max_duration_ns,
+        max_duration_ns=runtime_config.max_duration_ns,
     )

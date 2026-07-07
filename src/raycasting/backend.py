@@ -26,6 +26,7 @@ from src.raycasting.types import RaycastResult
 
 if TYPE_CHECKING:
     from src.raycasting.scene import SceneModel
+    from src.runtime_config import RaycastingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -144,14 +145,11 @@ class SimRaycastBackend(RaycastBackend):
         return result
 
 
-def build_backend(config: dict) -> RaycastBackend:
-    """Select and construct the ray-casting backend from the runtime config's
-    ``raycasting`` section. Defaults to the GPU (MLX) backend; ``sim`` is the
-    CPU reference. The GPU stack is imported lazily so a sim-only deployment
-    never needs it."""
-    from src.runtime_config import RaycastingConfig
-
-    rc = RaycastingConfig.from_config(config or {})
+def build_backend(rc: "RaycastingConfig") -> RaycastBackend:
+    """Select and construct the ray-casting backend from an already-parsed
+    :class:`~src.runtime_config.RaycastingConfig`. Defaults to the GPU (MLX)
+    backend; ``sim`` is the CPU reference. The GPU stack is imported lazily so a
+    sim-only deployment never needs it."""
     if rc.backend == "sim":
         return SimRaycastBackend()
     if rc.backend in ("gpu", "mlx"):

@@ -6,6 +6,7 @@ from src.datatypes.motion_state import MotionState
 from src.sensors.base_sensor import BaseSensor
 from src.sensors.registry import get_sensor_class
 from src.robot_config import RobotBundle, SensorSpec
+from src.runtime_config import RaycastingConfig
 from src.scene import Scene
 import src.sensors.builtin  # noqa: F401  (registers the built-in sensor types)
 
@@ -16,7 +17,7 @@ class SensorSuite:
     Manages the robot's sensor configuration, spatial frame transformations (TF),
     and schedules/triggers sensor data capture based on frequencies.
     """
-    def __init__(self, robot: RobotBundle, config: dict):
+    def __init__(self, robot: RobotBundle, raycasting: RaycastingConfig):
         """
         Initialize the SensorSuite from a loaded robot model and config.
 
@@ -24,7 +25,8 @@ class SensorSuite:
             robot: Validated RobotBundle (from robot_config.load_robot) supplying
                 the link frame tree and sensor specs. The robot's body dimensions
                 live on the RobotBundle -- SensorSuite manages sensors/TF only.
-            config: Full yaml config dict (used for scene/ray-caster backend selection).
+            raycasting: Parsed ``RaycastingConfig`` slice used to build the shared
+                Scene's ray-casting backend (the only config the suite needs).
 
         Note: the Scene is built here but not yet bound -- its geometry and
         category table come from the sim (which postdates the suite), so it is
@@ -33,10 +35,10 @@ class SensorSuite:
         # 1. Initialize TF Manager from the URDF-derived frame tree.
         self.tf_manager = TFManager(robot.frames)
 
-        # 2. Shared Scene (geometry + semantics + ray-casting; backend from config).
-        #    One instance is shared by every sensor so it is extracted/built once.
-        self.scene = Scene(config)
-        self.config = config
+        # 2. Shared Scene (geometry + semantics + ray-casting; backend from the
+        #    raycasting slice). One instance is shared by every sensor so it is
+        #    extracted/built once.
+        self.scene = Scene(raycasting)
 
         # 3. Build Sensors
         self.sensors: List[BaseSensor] = []
@@ -68,7 +70,6 @@ class SensorSuite:
                 parameters=spec.parameters,
                 tf_manager=self.tf_manager,
                 scene=self.scene,
-                config=self.config,
                 output_names=list(spec.outputs),
                 output_params={name: out.params for name, out in spec.outputs.items()},
             )

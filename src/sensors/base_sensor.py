@@ -18,7 +18,6 @@ class BaseSensor(abc.ABC):
         parameters: Dict[str, Any],
         tf_manager: Any,
         scene: Any = None,
-        config: Optional[dict] = None,
         output_names: Optional[list] = None,
         output_params: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
@@ -45,7 +44,6 @@ class BaseSensor(abc.ABC):
         self.parent_link = parent_link
         self.hz = hz
         self.parameters = parameters
-        self.config = config or {}
         self.tf_manager = tf_manager
         self.scene = scene
     @classmethod

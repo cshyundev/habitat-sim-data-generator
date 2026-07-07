@@ -23,7 +23,6 @@ class IdealLaser2D(Laser2D):
         parameters: dict,
         tf_manager: Any,
         scene: Any = None,
-        config: Optional[dict] = None,
         output_names: Optional[list] = None,
         output_params: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
@@ -35,7 +34,6 @@ class IdealLaser2D(Laser2D):
             parameters=parameters,
             tf_manager=tf_manager,
             scene=scene,
-            config=config,
             output_names=output_names,
             output_params=output_params,
         )

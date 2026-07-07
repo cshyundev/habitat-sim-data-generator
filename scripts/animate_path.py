@@ -150,13 +150,16 @@ def animate(occ_grid: OccupancyGrid2D, poses: List[Pose3D],
 def build_occ_from_sim(config: dict) -> OccupancyGrid2D:
     """Loads the simulator from config and converts it to an occupancy grid."""
     from src.robot_config import load_robot
+    from src.runtime_config import RaycastingConfig
     from src.sensors.suite import SensorSuite
     from src.simulator.factory import create_simulator
 
     p_cfg = config.get("planner", {})
     robot = load_robot(config)
-    sensor_suite = SensorSuite(robot, config)
-    sim = create_simulator(config, robot, sensor_suite)
+    sensor_suite = SensorSuite(robot, RaycastingConfig.from_config(config))
+    sim = create_simulator(
+        config["scene_dataset_config_file"], config["scene_id"], robot, sensor_suite
+    )
     try:
         return generate_occupancy_grid_from_sim(
             sim=sim,

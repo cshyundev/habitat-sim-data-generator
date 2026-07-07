@@ -1,5 +1,10 @@
+import os
+import tempfile
 import unittest
 
+import yaml
+
+from src.robot import cylinder_urdf
 from src.robot_config import ConfigError
 from src.runtime_config import (
     McapExportConfig,
@@ -7,6 +12,29 @@ from src.runtime_config import (
     RaycastingConfig,
     validate_runtime_config,
 )
+
+
+# RuntimeConfig now loads the robot model (URDF + sensor spec) as its last step,
+# so a valid config needs real robot files. Built once into a temp dir.
+_TMP = tempfile.mkdtemp()
+
+
+def _robot_files() -> dict:
+    urdf = os.path.join(_TMP, "robot.urdf")
+    if not os.path.exists(urdf):
+        with open(urdf, "w") as f:
+            f.write(cylinder_urdf(1.6, 0.15, mounts=[
+                {"name": "lidar_link", "parent": "base_link",
+                 "xyz": [0, 0, 0.3], "rpy": [0, 0, 0]},
+            ]))
+    sensors = os.path.join(_TMP, "sensors.yaml")
+    if not os.path.exists(sensors):
+        with open(sensors, "w") as f:
+            yaml.safe_dump({"sensors": [
+                {"link": "lidar_link", "type": "lidar3d", "hz": 10,
+                 "outputs": {"point_cloud": {}}, "parameters": {}},
+            ]}, f)
+    return {"urdf": urdf, "sensors": sensors}
 
 
 def _valid_config():
@@ -20,6 +48,7 @@ def _valid_config():
             "local": {"type": "differential_drive", "params": {}},
         },
         "robot": {
+            **_robot_files(),
             "raycasting": {
                 "backend": "sim",
                 "geometry": "collision",

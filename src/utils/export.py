@@ -131,14 +131,13 @@ class McapExporter:
     full ``.msg`` text, so the resulting MCAP is self-describing and decodable
     by any ROS 2 / Foxglove / rosbag2 tool.
     """
-    def __init__(self, mcap_path: str, config: dict):
+    def __init__(self, mcap_path: str, export_config: McapExportConfig):
         self.mcap_path = mcap_path
-        self.config = config
+        self.export_config = export_config  # parsed once at the entry point
         self.file = None
         self.writer: Optional[Ros2Writer] = None
         self.schemas = {}   # schema_name -> mcap.records.Schema
         self.channels = {}  # channel_key -> (topic, Schema)
-        self.export_config = None  # parsed McapExportConfig (set in start())
 
     def start(self) -> None:
         """Opens the output file, initializes the writer, and registers schemas/channels."""
@@ -149,9 +148,7 @@ class McapExporter:
         self.file = open(self.mcap_path, "wb")
         self.writer = Ros2Writer(self.file)
 
-        # Register channels defined in config["mcap_export"]["channels"].
-        # Parsed once here and stored so the owning sink can reuse it.
-        self.export_config = McapExportConfig.from_config(self.config)
+        # Register the statically-declared mcap_export.channels.
         for key, val in self.export_config.channels.items():
             self.register_channel_dynamic(key, val.topic, val.schema)
 

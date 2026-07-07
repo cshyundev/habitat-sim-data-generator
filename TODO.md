@@ -47,19 +47,28 @@ classes stay as thin cast-then-call wrappers for `scripts/` and tests (delegatin
 avoids a second raycast in the streaming path, where the camera already holds the
 instance/class maps).
 
-### 4. Validated `RuntimeConfig` no longer re-parsed downstream — DONE (targeted)
-Killed the concrete double-parses (full `RuntimeConfig` threading through every
-signature was intentionally left out of scope):
-- `McapExportConfig.from_config` ran twice — now `McapExporter.start` parses once
-  and stores `self.export_config`, and `McapSink.on_start` reads it back
-  (`src/utils/export.py`, `src/pipeline/mcap_sink.py`).
-- `max_duration_ns_from_config` deleted; `RuntimeConfig.max_duration_ns`
-  (validated at entry) is threaded via `build_pipeline` into `StreamingPipeline`.
-- The camera's `RaycastingConfig.from_config` re-parse is gone (folded into item 5:
-  the camera reuses the raycaster's model instead of re-extracting with its own
-  parsed geometry).
-The single legitimate `RaycastingConfig` parse for backend selection stays (now
-in `raycasting.build_backend`, used by `Scene`).
+### 4. Validated `RuntimeConfig` no longer re-parsed downstream — DONE (full)
+The raw `config` dict is no longer threaded in parallel with the validated
+config: it is parsed **exactly once** at the entry point (`validate_runtime_config`
++ `load_robot`), and only typed slices flow downstream. Verified: every
+`.from_config(...)` call now lives inside `src/runtime_config.py`, and no raw
+`config[...]` subscripting remains anywhere in `src`.
+- `build_backend` / `Scene` / `SensorSuite` take a `RaycastingConfig` (no re-parse);
+  the camera reads `scene.geometry` for the `sim`-backend bbox3d fallback instead
+  of re-parsing `RaycastingConfig` from a per-sensor dict. The dead `config` param
+  is gone from every sensor constructor.
+- Planners: `PlannerConfig` now carries the typed `global_params`/`local_params`
+  (parsed once via registry-registered parsers); `build_pipeline` builds via
+  `build_planners(runtime_config.planner)` — no dict.
+- `create_simulator` / `extract_visual_map_as_markers` take the validated scene
+  fields directly; `McapSink`/`McapExporter` take a `McapExportConfig`.
+- The raw dict now has **exactly one consumer**: `validate_runtime_config(config)`
+  at the entry point. `RuntimeConfig` owns the loaded `robot: RobotBundle` too
+  (`load_robot` runs as the last step of `from_config`, after value validation),
+  so even the robot model no longer re-reads the dict. After that one call the
+  dict goes out of scope; nothing downstream sees it. The former MCAP
+  `config_snapshot` passthrough (the last raw-dict survivor) was dropped —
+  provenance archiving is deferred until the config schema stabilizes.
 
 ### 5. Scene mesh loading — minimal reuse DONE; consolidation still OPEN
 DONE: the camera's bbox3d path reuses the `SceneModel` the shared `Scene` already

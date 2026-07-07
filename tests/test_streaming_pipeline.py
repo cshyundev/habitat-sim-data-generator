@@ -97,7 +97,6 @@ class TestStreamingPipelinePlanning(unittest.TestCase):
         local_planner = _LocalPlanner()
 
         pipeline = StreamingPipeline(
-            config={},
             sim=_Sim(),
             sensor_suite=_SensorSuite(),
             global_planner=global_planner,

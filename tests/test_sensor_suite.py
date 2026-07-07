@@ -11,12 +11,13 @@ from src.sensors.suite import SensorSuite
 from src.sensors.base_sensor import BaseSensor
 from src.sensors.registry import register_sensor, get_sensor_class, registered_sensor_types
 from src.robot_config import ConfigError, load_robot
+from src.runtime_config import RaycastingConfig
 import src.sensors.builtin  # noqa: F401  (registers lidar3d/camera/imu)
 
 
 def _suite(cfg):
     """Load the robot model once, then build the SensorSuite from it (new wiring)."""
-    return SensorSuite(load_robot(cfg), cfg)
+    return SensorSuite(load_robot(cfg), RaycastingConfig.from_config(cfg))
 
 
 # --- helpers: build new-format configs (URDF file + sensors file) ----

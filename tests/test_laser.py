@@ -9,6 +9,7 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.datatypes.motion_state import MotionState
+from src.runtime_config import RaycastingConfig
 from src.scene import Scene
 from src.sensors.laser2d.ideal_laser import IdealLaser2D
 from src.utils.tf import TFManager
@@ -89,7 +90,7 @@ def run_test():
             "azimuth_bins": 720,
         },
         tf_manager=tf_manager,
-        scene=Scene({"raycasting": {"backend": "gpu", "geometry": "visual"}}),
+        scene=Scene(RaycastingConfig(backend="gpu", geometry="visual")),
         output_names=["laser_scan"],
     )
 

@@ -122,7 +122,7 @@ class TestVisualizationSink(unittest.TestCase):
             "position": np.zeros(3), "orientation": np.array([0.0, 0.0, 0.0, 1.0]),
             "scale": np.ones(3),
         }]
-        ctx = StreamContext(config={}, scene_markers=markers,
+        ctx = StreamContext(scene_markers=markers,
                             tf_manager=_FakeTF(), sensors=[])
         sink.on_start(ctx)  # must not raise
         self.assertEqual(backend.paths("mesh"), ["world/scene/object_3"])
@@ -138,7 +138,7 @@ class TestVisualizationSink(unittest.TestCase):
             "scale": np.ones(3),
         }]
         ctx = StreamContext(
-            config={}, scene_markers=markers,
+            scene_markers=markers,
             tf_manager=_FakeTF(),
             sensors=[_fake_lidar(), _FakeSensor("imu", "imu", "imu_link")],
         )
@@ -154,7 +154,7 @@ class TestVisualizationSink(unittest.TestCase):
     def test_layout_requests_single_imu_window_when_present(self):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
-        ctx = StreamContext(config={}, scene_markers=[],
+        ctx = StreamContext(scene_markers=[],
                             tf_manager=_FakeTF(),
                             sensors=[_fake_lidar(), _FakeSensor("imu", "imu", "imu_link")],
                             sensor_outputs={"imu.imu": {"params": {}}})
@@ -165,7 +165,7 @@ class TestVisualizationSink(unittest.TestCase):
     def test_layout_has_no_imu_window_when_absent(self):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
-        ctx = StreamContext(config={}, scene_markers=[],
+        ctx = StreamContext(scene_markers=[],
                             tf_manager=_FakeTF(), sensors=[_fake_lidar()])
         sink.on_start(ctx)
         layouts = [c[1] for c in backend.calls if c[0] == "layout"]

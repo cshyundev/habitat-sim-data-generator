@@ -25,7 +25,6 @@ class TFProvider(Protocol):
 @dataclass
 class StreamContext:
     """One-time context handed to each sink at the start of a run."""
-    config: dict
     scene_markers: List[dict]
     tf_manager: TFProvider
     sensors: List[BaseSensor]
