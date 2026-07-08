@@ -101,24 +101,28 @@ Out of scope, filed for later: vendored `models/` latent bugs
 `CamType.from_string` round-trip / `THINPRISIM` misspelling). Not on the config
 path this refactor touches.
 
-## P2 — BaseSensor pull-ups (do before adding the next sensor)
+## P2 — BaseSensor pull-ups (do before adding the next sensor) — DONE
 
-### 2. Mount-pose resolution copy-pasted x4
+### 2. Mount-pose resolution copy-pasted x4 — DONE
 `self.pose = self.tf_manager.get_relative_pose("base_link", self.parent_link)`
-appears with the same no-silent-fallback comment block in `camera.py:106`,
-`base_lidar.py:25`, `base_laser.py:18`, `ideal_imu.py:30`. Every sensor does
-it, so it belongs in `BaseSensor.__init__` (keeping the loud failure).
+appeared with the same no-silent-fallback comment block in `camera.py`,
+`base_lidar.py`, `base_laser.py`, `ideal_imu.py`. Moved into
+`BaseSensor.__init__` (`base_sensor.py`); the four subclasses no longer set
+it themselves.
 
-### 3. World-pose composition copy-pasted x3
+### 3. World-pose composition copy-pasted x3 — DONE
 The `compose_pose(agent_pos, q_agent, self.pose.position, self.pose.orientation)`
-dance is repeated in `camera.world_pose()` (`camera.py:409`),
-`ideal_lidar.get_observation`, and `ideal_laser.get_observation`. Promote the
-camera's `world_pose(motion_state)` to `BaseSensor`; the other two call it.
+dance was repeated in `camera.world_pose()`, `ideal_lidar.get_observation`,
+and `ideal_laser.get_observation`. `world_pose(motion_state)` now lives on
+`BaseSensor`; the camera's override was deleted and the two ideal sensors
+call `self.world_pose(motion_state)` instead of duplicating the composition.
 
-### 4. min/max_distance parsing x3 with inconsistent coercion
-`base_laser.py` casts `float(...)`, `base_lidar.py:27-28` does not, camera
-casts. A YAML string value breaks only the lidar (in range comparisons).
-One parse in one place (falls out of item 2/3's pull-up, or a small helper).
+### 4. min/max_distance parsing x3 with inconsistent coercion — DONE
+`base_laser.py` cast `float(...)`, `base_lidar.py` did not, camera cast.
+Added `BaseSensor._parse_distance_range(parameters, default_min, default_max)`
+and switched all three (`base_lidar.py`, `base_laser.py`, `camera.py`) to it,
+so a YAML string value now coerces consistently everywhere (camera keeps its
+0.05 `min_distance` default via the `default_min` argument).
 
 ## P3 — Dead code
 

@@ -7,7 +7,7 @@ from src.datatypes.laser_scan import LaserScan
 from src.datatypes.motion_state import MotionState
 from src.sensors.laser2d.base_laser import Laser2D
 from src.sensors.registry import register_sensor
-from src.utils.geometry import compose_pose, rotate_vectors
+from src.utils.geometry import rotate_vectors
 
 
 @register_sensor("laser2d")
@@ -69,15 +69,7 @@ class IdealLaser2D(Laser2D):
         if self.scene is None:
             raise RuntimeError("Laser2D requires a Scene; no sim.cast_ray fallback is created.")
 
-        agent_pos = np.asarray(motion_state.position, dtype=np.float64)
-        q_agent_xyzw = np.asarray(motion_state.orientation, dtype=np.float64)
-
-        sensor_pos_global, q_sensor_global_xyzw = compose_pose(
-            agent_pos,
-            q_agent_xyzw,
-            self.pose.position,
-            self.pose.orientation,
-        )
+        sensor_pos_global, q_sensor_global_xyzw = self.world_pose(motion_state)
 
         directions_global = rotate_vectors(
             self.ray_directions, q_sensor_global_xyzw

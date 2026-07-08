@@ -19,7 +19,6 @@ from src.sensors.camera.model_factory import (
 )
 from src.sensors.registry import register_sensor
 from src.raycasting.types import RaycastResult
-from src.utils.geometry import compose_pose
 
 
 # RGB camera models that habitat-sim can rasterize natively (no remap needed).
@@ -79,8 +78,9 @@ class CameraSensor(BaseSensor):
         self.model = p.get("model", "pinhole").lower()
         self.width = int(p.get("width", 640))
         self.height = int(p.get("height", 480))
-        self.min_distance = float(p.get("min_distance", 0.05))
-        self.max_distance = float(p.get("max_distance", 100.0))
+        self.min_distance, self.max_distance = self._parse_distance_range(
+            p, default_min=0.05
+        )
         self.hfov = self._native_hfov()
 
         # --- Enabled outputs + their settings (BaseSensor stored self.outputs) ---
@@ -94,11 +94,6 @@ class CameraSensor(BaseSensor):
         default_depth = "planar" if self.model in _PINHOLE_LIKE else "euclidean"
         self.depth_type = str(p.get("depth_type", default_depth)).lower()
         self.min_box_px = int(p.get("min_box_px", 8))
-
-        # --- Mount pose. No silent fallback: an unresolvable parent_link is a
-        # config error, not a recoverable one -- masking it here would mount the
-        # sensor at identity and produce plausible-looking but wrong ground truth.
-        self.pose = self.tf_manager.get_relative_pose("base_link", self.parent_link)
 
         # --- Projection Camera + ray table, built only if an output needs it ---
         self.cam: Optional[Camera] = None
@@ -304,27 +299,6 @@ class CameraSensor(BaseSensor):
     # ------------------------------------------------------------------
     # Ray casting (depth / semantic / instance, and reused by detections)
     # ------------------------------------------------------------------
-    def world_pose(self, motion_state: MotionState) -> tuple[np.ndarray, np.ndarray]:
-        """Compute this camera's world pose at ``motion_state``.
-
-        position = agent_pos + R(agent) * mount_offset; orientation = R(agent) * R(offset).
-
-        Args:
-            motion_state: Robot state that owns the base pose.
-
-        Returns:
-            Tuple ``(position_xyz, quat_xyzw)`` in Habitat world coordinates.
-        """
-        agent_pos = np.asarray(motion_state.position, dtype=np.float64)
-        q_agent_xyzw = np.asarray(motion_state.orientation, dtype=np.float64)
-        sensor_pos_global, q_sensor_global_xyzw = compose_pose(
-            agent_pos,
-            q_agent_xyzw,
-            self.pose.position,
-            self.pose.orientation,
-        )
-        return sensor_pos_global, q_sensor_global_xyzw
-
     def _cast(
         self, sim: habitat_sim.Simulator, motion_state: MotionState
     ) -> tuple[RaycastResult, np.ndarray]:

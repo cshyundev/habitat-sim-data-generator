@@ -18,10 +18,8 @@ class Laser2D(BaseSensor, abc.ABC):
         """Initialize common 2D laser configuration."""
         super().__init__(**kwargs)
         self.uuid = self.name
-        self.pose = self.tf_manager.get_relative_pose("base_link", self.parent_link)
 
-        self.min_distance = float(self.parameters.get("min_distance", 0.1))
-        self.max_distance = float(self.parameters.get("max_distance", 100.0))
+        self.min_distance, self.max_distance = self._parse_distance_range(self.parameters)
         self.ray_directions: Optional[np.ndarray] = None
 
     def is_native(self) -> bool:

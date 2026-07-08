@@ -22,15 +22,8 @@ class LiDAR3D(BaseSensor, abc.ABC):
         super().__init__(**kwargs)
         self.uuid = self.name
 
-        # Resolve static pose offset from base_link to sensor's parent_link.
-        # No silent fallback: an unresolvable parent_link is a config error, not
-        # a recoverable one -- masking it here would silently mount the sensor
-        # at identity and produce plausible-looking but wrong ground truth.
-        self.pose = self.tf_manager.get_relative_pose("base_link", self.parent_link)
+        self.min_distance, self.max_distance = self._parse_distance_range(self.parameters)
 
-        self.min_distance = self.parameters.get("min_distance", 0.1)
-        self.max_distance = self.parameters.get("max_distance", 100.0)
-        
         # Precomputed local ray directions: numpy array of shape (H, W, 3)
         self.ray_directions = None
 

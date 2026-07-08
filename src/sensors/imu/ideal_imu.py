@@ -25,9 +25,6 @@ class IdealIMU(BaseSensor):
         # IMU does not ray-cast; ``scene`` (forwarded via kwargs) is accepted
         # only for a uniform sensor constructor signature.
         super().__init__(**kwargs)
-        # No silent identity-pose fallback: an unresolvable mount is a config
-        # error, exactly as the ray-based sensors treat it.
-        self.pose = self.tf_manager.get_relative_pose("base_link", self.parent_link)
         self._base_R_imu = quaternion_to_matrix(self.pose.orientation)
         if "apply_gravity" in self.parameters:
             raise ValueError(

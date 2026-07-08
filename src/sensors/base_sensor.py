@@ -1,8 +1,10 @@
 import abc
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 import habitat_sim
+import numpy as np
 
 from src.datatypes.motion_state import MotionState
+from src.utils.geometry import compose_pose
 from src.utils.tf import TFManager
 
 if TYPE_CHECKING:
@@ -50,6 +52,13 @@ class BaseSensor(abc.ABC):
         self.tf_manager = tf_manager
         self.scene = scene
         self.outputs: Set[str] = {str(out_name).lower() for out_name in (output_names or [])}
+
+        # Mount pose relative to base_link. No silent fallback: an
+        # unresolvable parent_link is a config error, not a recoverable one --
+        # masking it here would mount the sensor at identity and produce
+        # plausible-looking but wrong ground truth.
+        self.pose = self.tf_manager.get_relative_pose("base_link", self.parent_link)
+
     @classmethod
     def validate_outputs(cls, outputs: Dict[str, object]) -> None:
         """Validate sensor-specific output names. Subclasses may override."""
@@ -93,6 +102,37 @@ class BaseSensor(abc.ABC):
                     f"{sensor_type} sensor: parameter '{key}' must be a positive "
                     f"number (got {value!r})."
                 )
+
+    @staticmethod
+    def _parse_distance_range(
+        parameters: Dict[str, object],
+        default_min: float = 0.1,
+        default_max: float = 100.0,
+    ) -> tuple[float, float]:
+        """Parse ``min_distance``/``max_distance`` with consistent float coercion."""
+        min_distance = float(parameters.get("min_distance", default_min))
+        max_distance = float(parameters.get("max_distance", default_max))
+        return min_distance, max_distance
+
+    def world_pose(self, motion_state: MotionState) -> tuple[np.ndarray, np.ndarray]:
+        """Compute this sensor's world pose at ``motion_state``.
+
+        position = agent_pos + R(agent) * mount_offset; orientation = R(agent) * R(offset).
+
+        Args:
+            motion_state: Robot state that owns the base pose.
+
+        Returns:
+            Tuple ``(position_xyz, quat_xyzw)`` in Habitat world coordinates.
+        """
+        agent_pos = np.asarray(motion_state.position, dtype=np.float64)
+        q_agent_xyzw = np.asarray(motion_state.orientation, dtype=np.float64)
+        return compose_pose(
+            agent_pos,
+            q_agent_xyzw,
+            self.pose.position,
+            self.pose.orientation,
+        )
 
     @abc.abstractmethod
     def is_native(self) -> bool:

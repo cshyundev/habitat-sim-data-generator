@@ -6,7 +6,7 @@ from src.sensors.lidar3d.base_lidar import LiDAR3D
 from src.datatypes.motion_state import MotionState
 from src.datatypes.point_cloud import PointCloud
 from src.sensors.registry import register_sensor
-from src.utils.geometry import compose_pose, rotate_vectors
+from src.utils.geometry import rotate_vectors
 
 @register_sensor("lidar3d")
 class IdealLiDAR3D(LiDAR3D):
@@ -85,17 +85,8 @@ class IdealLiDAR3D(LiDAR3D):
 
         H, W = self.altitude_bins, self.azimuth_bins
 
-        agent_pos = np.asarray(motion_state.position, dtype=np.float64)
-        # MotionState.orientation is a quaternion [x, y, z, w] (Habitat frame).
-        q_agent_xyzw = np.asarray(motion_state.orientation, dtype=np.float64)
+        sensor_pos_global, q_sensor_global_xyzw = self.world_pose(motion_state)
 
-        sensor_pos_global, q_sensor_global_xyzw = compose_pose(
-            agent_pos,
-            q_agent_xyzw,
-            self.pose.position,
-            self.pose.orientation,
-        )
-        
         flat_directions_local = self.ray_directions.reshape(-1, 3)
         flat_directions_global = rotate_vectors(flat_directions_local, q_sensor_global_xyzw)
 
