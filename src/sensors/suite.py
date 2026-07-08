@@ -71,20 +71,17 @@ class SensorSuite:
                 tf_manager=self.tf_manager,
                 scene=self.scene,
                 output_names=list(spec.outputs),
-                output_params={name: out.params for name, out in spec.outputs.items()},
             )
             sensor = sensor_cls(**kwargs)
             self.sensors.append(sensor)
 
-    def sensor_outputs(self) -> Dict[str, Dict[str, object]]:
-        """Return configured output metadata keyed by ``sensor.output``."""
-        outputs: Dict[str, Dict[str, object]] = {}
-        for spec in self._spec_by_name.values():
-            for output_name, output in spec.outputs.items():
-                outputs[f"{spec.name}.{output_name}"] = {
-                    "params": dict(output.params),
-                }
-        return outputs
+    def sensor_outputs(self) -> List[str]:
+        """Return the declared sensor output channel keys (``"<sensor>.<output>"``)."""
+        return [
+            f"{spec.name}.{output_name}"
+            for spec in self._spec_by_name.values()
+            for output_name in spec.outputs
+        ]
 
     def get_native_sensor_specs(self) -> List[habitat_sim.SensorSpec]:
         """

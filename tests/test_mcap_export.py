@@ -286,10 +286,7 @@ class TestMcapSinkMapExport(unittest.TestCase):
                 scene_markers=[],
                 tf_manager=_FakeTFManager(),
                 sensors=[_FakeCamera()],
-                sensor_outputs={
-                    "cam.rgb": {"params": {}},
-                    "cam.bbox2d": {"params": {"min_box_px": 8}},
-                },
+                sensor_outputs=["cam.rgb", "cam.bbox2d"],
                 category_names={},
             )
 

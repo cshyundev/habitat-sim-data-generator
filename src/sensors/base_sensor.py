@@ -1,5 +1,5 @@
 import abc
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, Set, TYPE_CHECKING
 import habitat_sim
 
 from src.datatypes.motion_state import MotionState
@@ -23,7 +23,6 @@ class BaseSensor(abc.ABC):
         tf_manager: TFManager,
         scene: Optional["Scene"] = None,
         output_names: Optional[List[str]] = None,
-        output_params: Optional[Dict[str, Dict[str, object]]] = None,
     ):
         """
         Initialize the sensor.
@@ -39,9 +38,9 @@ class BaseSensor(abc.ABC):
                 ray-casting) used for ray-based sensing and detections. Ray-based
                 sensors require it to be supplied by ``SensorSuite`` or tests.
                 IMU-like sensors ignore it; it is held for interface uniformity.
-            output_names/output_params: The sensor's declared outputs and their
-                per-output params. Merged and stored as ``self.outputs``
-                (``lowercased name -> params dict``) for every sensor.
+            output_names: The sensor's declared output names, stored (lowercased)
+                as the ``self.outputs`` set. Outputs carry no per-output params;
+                sensor settings live in ``parameters``.
         """
         self.name = name
         self.sensor_type = sensor_type
@@ -50,10 +49,7 @@ class BaseSensor(abc.ABC):
         self.parameters = parameters
         self.tf_manager = tf_manager
         self.scene = scene
-        self.outputs: Dict[str, Dict[str, object]] = {
-            str(out_name).lower(): dict((output_params or {}).get(out_name, {}) or {})
-            for out_name in (output_names or [])
-        }
+        self.outputs: Set[str] = {str(out_name).lower() for out_name in (output_names or [])}
     @classmethod
     def validate_outputs(cls, outputs: Dict[str, object]) -> None:
         """Validate sensor-specific output names. Subclasses may override."""

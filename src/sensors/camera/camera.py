@@ -1,38 +1,35 @@
 import math
 import numpy as np
-import magnum as mn
 import habitat_sim
 from typing import Dict, Optional
 
 from src.sensors.base_sensor import BaseSensor
-from src.datatypes.image import RGBImage, DepthMap, SemanticMap, InstanceMap
+from src.datatypes.image import SemanticMap, InstanceMap
 from src.datatypes.motion_state import MotionState
 from src.detections.obb import global_obbs
 from src.detections.bbox2d import boxes_from_maps
 from src.detections.bbox3d import obbs_for_visible
-from src.sensors.camera.models import (
-    Camera,
-    PerspectiveCamera,
-    OpenCVFisheyeCamera,
-    ThinPrismFisheyeCamera,
-    OmnidirectionalCamera,
-    DoubleSphereCamera,
-    EquirectangularCamera,
+from src.sensors.camera import rgb, raycast
+from src.sensors.camera.models import Camera, EquirectangularCamera
+from src.sensors.camera.model_factory import (
+    available_models,
+    build_camera_model,
+    camera_intrinsic_values,
+    model_parameter_keys,
 )
-from src.sensors.camera.remap import transition_camera_view
 from src.sensors.registry import register_sensor
 from src.raycasting.types import RaycastResult
-from src.utils.geometry import (
-    compose_pose,
-    quaternion_to_habitat_euler,
-    rotate_vectors,
-)
+from src.utils.geometry import compose_pose
 
 
 # RGB camera models that habitat-sim can rasterize natively (no remap needed).
 _HABITAT_NATIVE_RGB = {"pinhole", "equirectangular", "orthographic"}
 # Models treated as a perspective/pinhole pipeline (planar z-depth default).
 _PINHOLE_LIKE = {"pinhole", "perspective"}
+# Fallback FOV for a native RGB spec with no intrinsic (only the unused
+# orthographic model reaches this -- its habitat spec needs a value but has no
+# focal length). hfov is never a user input.
+_DEFAULT_HFOV = 90.0
 
 
 def _as_builtin(value: object) -> object:
@@ -47,13 +44,6 @@ def _as_builtin(value: object) -> object:
     if isinstance(value, np.generic):
         return value.item()
     return value
-
-
-def _camera_intrinsic_values(parameters: Dict[str, object]) -> tuple[float, float, float, float]:
-    intrinsic = parameters["intrinsic"]
-    if not isinstance(intrinsic, (list, tuple)) or len(intrinsic) != 4:
-        raise ValueError("camera intrinsic must be [fx, fy, cx, cy].")
-    return tuple(float(v) for v in intrinsic)
 
 
 @register_sensor("camera")
@@ -75,66 +65,96 @@ class CameraSensor(BaseSensor):
     """
 
     def __init__(self, **kwargs) -> None:
-        """Initialize camera projection, outputs, and ray-cast state."""
-        super().__init__(**kwargs)
+        """Read config into the per-capture state this camera needs.
 
-        # BaseSensor stores the declared outputs as ``self.outputs``
-        # (lowercased name -> params); the camera reads them by modality name.
+        One linear pass: geometry, then the enabled outputs and their settings,
+        the mount pose, and finally the projection ``Camera`` + ray table -- built
+        only when an output actually needs them (ray casting, or RGB on a
+        non-native model that must be remapped).
+        """
+        super().__init__(**kwargs)
+        p = self.parameters
+
+        # --- Geometry (FOV is derived from the intrinsic, never an input) ---
+        self.model = p.get("model", "pinhole").lower()
+        self.width = int(p.get("width", 640))
+        self.height = int(p.get("height", 480))
+        self.min_distance = float(p.get("min_distance", 0.05))
+        self.max_distance = float(p.get("max_distance", 100.0))
+        self.hfov = self._native_hfov()
+
+        # --- Enabled outputs + their settings (BaseSensor stored self.outputs) ---
         self.modalities = set(self.outputs)
-        self.modality_params = self.outputs
-        parameters = self.parameters
-        self.model = parameters.get("model", "pinhole").lower()
-        self.width = int(parameters.get("width", 640))
-        self.height = int(parameters.get("height", 480))
-        if "hfov" in parameters:
-            self.hfov = float(parameters["hfov"])
-        elif "intrinsic" in parameters:
-            fx = _camera_intrinsic_values(parameters)[0]
-            self.hfov = math.degrees(2.0 * math.atan(self.width / (2.0 * fx)))
-        else:
-            self.hfov = 90.0
-        self.min_distance = float(parameters.get("min_distance", 0.05))
-        self.max_distance = float(parameters.get("max_distance", 100.0))
         self._raycast_outputs = self.modalities & {
             "depth", "semantic", "instance", "bbox2d", "bbox3d"
         }
+        # Output settings live only in the sensor's ``parameters`` (single source):
+        # depth_type: planar z-depth (pinhole) vs euclidean (wide-angle);
+        # min_box_px: drop 2D detections smaller than this many pixels.
+        default_depth = "planar" if self.model in _PINHOLE_LIKE else "euclidean"
+        self.depth_type = str(p.get("depth_type", default_depth)).lower()
+        self.min_box_px = int(p.get("min_box_px", 8))
 
-        # Resolve static offset pose from base_link to this sensor's parent_link.
-        # No silent fallback: an unresolvable parent_link is a config error, not
-        # a recoverable one -- masking it here would silently mount the sensor
-        # at identity and produce plausible-looking but wrong ground truth.
+        # --- Mount pose. No silent fallback: an unresolvable parent_link is a
+        # config error, not a recoverable one -- masking it here would mount the
+        # sensor at identity and produce plausible-looking but wrong ground truth.
         self.pose = self.tf_manager.get_relative_pose("base_link", self.parent_link)
 
-        # Depth representation: pinhole-like -> planar z-depth, wide-angle -> euclidean.
-        default_depth = "planar" if self.model in _PINHOLE_LIKE else "euclidean"
-        depth_cfg = self.modality_params.get("depth", {})
-        self.depth_type = depth_cfg.get(
-            "depth_type", parameters.get("depth_type", default_depth)
-        ).lower()
-
-        # Target projection model (spatialkit Camera). Needed for ray casting
-        # (depth/semantic) and for RGB remap (non-native models).
+        # --- Projection Camera + ray table, built only if an output needs it ---
         self.cam: Optional[Camera] = None
-        self.needs_remap = False
         self.src_cam: Optional[EquirectangularCamera] = None
-
+        self.needs_remap = False
+        self.render_height: Optional[int] = None
+        self.render_width: Optional[int] = None
         if self._raycast_outputs:
-            self.cam = self._build_model()
-            self._precompute_rays()
-        if self._has_output("rgb") and self.model not in _HABITAT_NATIVE_RGB:
-            # RGB with a non-native model: render equirect, then remap.
-            if self.cam is None:
-                self.cam = self._build_model()
+            self.cam = self._build_camera_model()
+            # Ray table (directions/validity/optical-axis cosine) in the habitat
+            # sensor frame; cast per capture from the world pose.
+            self._ray_dirs_local, self._ray_valid, self._ray_cos = raycast.precompute_rays(self.cam)
+        if "rgb" in self.modalities and self.model not in _HABITAT_NATIVE_RGB:
+            # Non-native RGB: render a large equirect source, then remap to model.
+            self.cam = self.cam or self._build_camera_model()
             self.needs_remap = True
-            self.render_height = int(parameters.get("render_height", 1024))
+            self.render_height = int(p.get("render_height", 1024))
             self.render_width = self.render_height * 2
             self.src_cam = EquirectangularCamera.from_image_size(
                 [self.render_width, self.render_height]
             )
-        # Detection context is read from the shared Scene (self.scene.categories /
-        # .model), populated when the Scene is bound to the sim. Per-instance world
-        # OBBs are memoized here on first bbox3d use.
+
+        # Per-instance world OBBs for bbox3d, memoized from the Scene on first use.
         self._world_obbs = None
+
+    def _native_hfov(self) -> float:
+        """Horizontal FOV in degrees for habitat's native RGB spec.
+
+        Pinhole/perspective derive it from the intrinsic ``fx``; other native
+        models have no intrinsic (only the unused orthographic spec actually
+        reads it) and fall back to :data:`_DEFAULT_HFOV`.
+        """
+        if self.model not in _PINHOLE_LIKE:
+            return _DEFAULT_HFOV
+        p = self.parameters
+        if "intrinsic" in p:
+            fx = camera_intrinsic_values(p)[0]
+        elif "focal_length" in p:
+            fx = float(tuple(p["focal_length"])[0])
+        else:
+            raise ValueError(
+                f"CameraSensor '{self.name}' model '{self.model}' requires an "
+                "intrinsic: provide 'intrinsic: [fx, fy, cx, cy]' (or "
+                "'focal_length' + 'principal_point')."
+            )
+        return math.degrees(2.0 * math.atan(self.width / (2.0 * fx)))
+
+    def _build_camera_model(self) -> Camera:
+        """Construct this sensor's spatialkit ``Camera`` via the model factory."""
+        return build_camera_model(
+            self.model,
+            self.parameters,
+            width=self.width,
+            height=self.height,
+            sensor_name=self.name,
+        )
 
     @classmethod
     def validate_outputs(cls, outputs: Dict[str, object]) -> None:
@@ -147,24 +167,14 @@ class CameraSensor(BaseSensor):
                 f"{', '.join(unsupported)}. Available: {', '.join(sorted(allowed))}."
             )
 
-    # Parameter keys read regardless of projection model.
+    # Parameter keys read regardless of projection model. The model-specific
+    # keys live in the model factory (`MODEL_SPECS`) and are pulled in via
+    # `model_parameter_keys` -- a single source shared with construction.
+    # (`intrinsic` is pinhole-specific and lives in the model keys, not here;
+    # `hfov` is not accepted at all -- it is derived from the intrinsic.)
     _COMMON_PARAMETERS = {
-        "model", "width", "height", "hfov", "intrinsic",
+        "model", "width", "height",
         "min_distance", "max_distance", "depth_type", "render_height", "min_box_px",
-    }
-    # Extra keys each projection model reads (mirrors `_build_model`).
-    _MODEL_PARAMETERS = {
-        "pinhole": {"focal_length", "principal_point", "skew", "radial", "tangential"},
-        "perspective": {"focal_length", "principal_point", "skew", "radial", "tangential"},
-        "opencv_fisheye": {"focal_length", "principal_point", "skew", "radial"},
-        "thinprism": {"focal_length", "principal_point", "radial", "tangential", "prism"},
-        "doublesphere": {"focal_length", "principal_point", "xi", "alpha", "fov_deg"},
-        "omnidirect": {
-            "distortion_center", "poly_coeffs", "inv_poly_coeffs", "affine", "fov_deg",
-        },
-        "equirect": {"min_phi_deg", "max_phi_deg"},
-        "equirectangular": {"min_phi_deg", "max_phi_deg"},
-        "orthographic": set(),
     }
 
     @classmethod
@@ -172,163 +182,32 @@ class CameraSensor(BaseSensor):
         """Reject unknown/invalid camera parameters at config time.
 
         The allowed key set is model-dependent: common keys plus the extras the
-        selected projection model reads. Required-but-missing model params are
-        still enforced later at construction (``_build_model``); this only
-        catches typos and cross-model leftovers up front.
+        selected projection model reads (from the model factory). Pinhole-like
+        models must carry an intrinsic (no FOV input). Other required-but-missing
+        model params are still enforced at construction (``build_camera_model``);
+        this catches typos, cross-model leftovers, and a missing intrinsic up
+        front.
         """
         model = str(parameters.get("model", "pinhole")).lower()
-        if model not in cls._MODEL_PARAMETERS:
+        if model not in available_models():
             raise ValueError(
                 f"camera sensor: unsupported model '{model}'. "
-                f"Available: {', '.join(sorted(cls._MODEL_PARAMETERS))}."
+                f"Available: {', '.join(available_models())}."
             )
-        allowed = cls._COMMON_PARAMETERS | cls._MODEL_PARAMETERS[model]
+        allowed = cls._COMMON_PARAMETERS | model_parameter_keys(model)
         cls._reject_unknown_parameters(parameters, allowed, f"camera[{model}]")
         cls._require_positive(
-            parameters, ("width", "height", "hfov", "min_distance", "max_distance"),
-            "camera",
+            parameters, ("width", "height", "min_distance", "max_distance"), "camera",
         )
-
-    def _has_output(self, output_name: str) -> bool:
-        return output_name in self.modalities
-
-    def _required_param(self, key: str) -> object:
-        if key not in self.parameters:
+        if model in _PINHOLE_LIKE and not (
+            "intrinsic" in parameters
+            or ("focal_length" in parameters and "principal_point" in parameters)
+        ):
             raise ValueError(
-                f"CameraSensor '{self.name}' model '{self.model}' requires "
-                f"parameter '{key}'."
+                f"camera[{model}] sensor: requires an intrinsic -- provide "
+                "'intrinsic: [fx, fy, cx, cy]' (or 'focal_length' + "
+                "'principal_point'). FOV input ('hfov') is not supported."
             )
-        return self.parameters[key]
-
-    def _required_tuple_param(self, key: str) -> tuple[object, ...]:
-        value = self._required_param(key)
-        if not isinstance(value, (list, tuple, np.ndarray)):
-            raise ValueError(
-                f"CameraSensor '{self.name}' model '{self.model}' parameter "
-                f"'{key}' must be a sequence."
-            )
-        return tuple(value)
-
-    # ------------------------------------------------------------------
-    # Model construction
-    # ------------------------------------------------------------------
-    def _build_model(self) -> Camera:
-        """Builds the target spatialkit Camera from this sensor's parameters."""
-        p = self.parameters
-        image_size = [self.width, self.height]
-
-        if self.model in _PINHOLE_LIKE:
-            if "intrinsic" in p:
-                fx, fy, cx, cy = _camera_intrinsic_values(p)
-                cam_dict = {
-                    "image_size": image_size,
-                    "focal_length": (fx, fy),
-                    "principal_point": (cx, cy),
-                    "skew": p.get("skew", 0.0),
-                    "radial": p.get("radial", [0.0, 0.0, 0.0]),
-                    "tangential": p.get("tangential", [0.0, 0.0]),
-                }
-                return PerspectiveCamera(cam_dict)
-            if "focal_length" in p and "principal_point" in p:
-                cam_dict = {
-                    "image_size": image_size,
-                    "focal_length": tuple(p["focal_length"]),
-                    "principal_point": tuple(p["principal_point"]),
-                    "skew": p.get("skew", 0.0),
-                    "radial": p.get("radial", [0.0, 0.0, 0.0]),
-                    "tangential": p.get("tangential", [0.0, 0.0]),
-                }
-                return PerspectiveCamera(cam_dict)
-            # Derive square-pixel intrinsics from horizontal FOV.
-            fx = self.width / (2.0 * math.tan(math.radians(self.hfov) / 2.0))
-            cam_dict = {
-                "image_size": image_size,
-                "focal_length": (fx, fx),
-                "principal_point": ((self.width - 1) / 2.0, (self.height - 1) / 2.0),
-                "skew": 0.0,
-                "radial": p.get("radial", [0.0, 0.0, 0.0]),
-                "tangential": p.get("tangential", [0.0, 0.0]),
-            }
-            return PerspectiveCamera(cam_dict)
-
-        if self.model == "opencv_fisheye":
-            return OpenCVFisheyeCamera(
-                {
-                    "image_size": image_size,
-                    "focal_length": self._required_tuple_param("focal_length"),
-                    "principal_point": self._required_tuple_param("principal_point"),
-                    "skew": p.get("skew", 0.0),
-                    "radial": self._required_param("radial"),  # [k1,k2,k3,k4]
-                }
-            )
-
-        if self.model == "thinprism":
-            return ThinPrismFisheyeCamera(
-                {
-                    "image_size": image_size,
-                    "focal_length": self._required_tuple_param("focal_length"),
-                    "principal_point": self._required_tuple_param("principal_point"),
-                    "radial": self._required_param("radial"),  # [k1,k2,k3,k4]
-                    "tangential": self._required_param("tangential"),  # [p1,p2]
-                    "prism": self._required_param("prism"),  # [sx1,sy1]
-                }
-            )
-
-        if self.model == "doublesphere":
-            return DoubleSphereCamera(
-                {
-                    "image_size": image_size,
-                    "focal_length": self._required_tuple_param("focal_length"),
-                    "principal_point": self._required_tuple_param("principal_point"),
-                    "xi": self._required_param("xi"),
-                    "alpha": self._required_param("alpha"),
-                    "fov_deg": p.get("fov_deg", 180.0),
-                }
-            )
-
-        if self.model == "omnidirect":
-            return OmnidirectionalCamera(
-                {
-                    "image_size": image_size,
-                    "distortion_center": self._required_tuple_param("distortion_center"),
-                    "poly_coeffs": self._required_param("poly_coeffs"),
-                    "inv_poly_coeffs": self._required_param("inv_poly_coeffs"),
-                    "affine": p.get("affine", [1.0, 0.0, 0.0]),
-                    "fov_deg": p.get("fov_deg", 180.0),
-                }
-            )
-
-        if self.model in ("equirect", "equirectangular"):
-            return EquirectangularCamera(
-                {
-                    "image_size": image_size,
-                    "min_phi_deg": p.get("min_phi_deg", -90.0),
-                    "max_phi_deg": p.get("max_phi_deg", 90.0),
-                }
-            )
-
-        raise ValueError(
-            f"[CameraSensor:{self.name}] Unsupported camera model '{self.model}'."
-        )
-
-    def _precompute_rays(self) -> None:
-        """
-        Precompute per-pixel ray directions in the **habitat sensor frame** for
-        ray casting, plus helpers for depth conversion and validity.
-
-        spatialkit cameras use the CV convention (+Z forward, +X right, +Y down).
-        Habitat sensors use the GL convention (-Z forward, +X right, +Y up), so we
-        flip Y and Z: R = diag(1, -1, -1).
-        """
-        rays_cv, valid = self.cam.convert_to_rays(z_fixed=False)  # (3, H*W) unit rays
-        rays_hab = rays_cv.copy()
-        rays_hab[1, :] *= -1.0  # Y: down -> up
-        rays_hab[2, :] *= -1.0  # Z: forward -> -Z
-
-        self._ray_dirs_local = rays_hab.T.astype(np.float64)  # (H*W, 3), habitat frame
-        self._ray_valid = np.asarray(valid).reshape(-1)
-        # Cosine to optical axis (CV +Z) for planar z-depth conversion.
-        self._ray_cos = rays_cv[2, :].astype(np.float64)
 
     def calibration_dict(self) -> Dict[str, object]:
         """Build a sidecar-friendly calibration record for this camera.
@@ -343,7 +222,7 @@ class CameraSensor(BaseSensor):
         """
         cam = self.cam
         if cam is None and self.model != "orthographic":
-            cam = self._build_model()
+            cam = self._build_camera_model()
 
         model_data = cam.export_cam_dict() if cam is not None else {
             "cam_type": self.model.upper(),
@@ -371,39 +250,23 @@ class CameraSensor(BaseSensor):
         """Return whether this camera contributes a native Habitat RGB sensor."""
         # RGB is rasterized by habitat (directly or via an equirect render source).
         # Depth/Semantic/Instance are ray-cast and therefore non-native.
-        return self._has_output("rgb")
+        return "rgb" in self.modalities
 
     def get_sensor_spec(self) -> Optional[habitat_sim.SensorSpec]:
         """SensorSpec for native rendering. Returns None without an RGB output."""
-        if not self._has_output("rgb"):
+        if "rgb" not in self.modalities:
             return None
-
-        if self.needs_remap:
-            # Render a large equirectangular source; get_observation remaps it.
-            # Equirectangular requires habitat's dedicated spec class -- a
-            # CameraSensorSpec with the EQUIRECTANGULAR subtype is rejected by the
-            # simulator ("specification is null").
-            spec = habitat_sim.EquirectangularSensorSpec()
-            spec.resolution = [self.render_height, self.render_width]
-        elif self.model == "equirectangular":
-            spec = habitat_sim.EquirectangularSensorSpec()
-            spec.resolution = [self.height, self.width]
-        else:
-            spec = habitat_sim.CameraSensorSpec()
-            spec.sensor_subtype = (
-                habitat_sim.SensorSubType.ORTHOGRAPHIC
-                if self.model == "orthographic"
-                else habitat_sim.SensorSubType.PINHOLE
-            )
-            spec.resolution = [self.height, self.width]
-            spec.hfov = mn.Deg(self.hfov)
-
-        spec.uuid = self.name
-        spec.sensor_type = habitat_sim.SensorType.COLOR
-        p = self.pose.position
-        spec.position = mn.Vector3(float(p[0]), float(p[1]), float(p[2]))
-        spec.orientation = mn.Vector3(*quaternion_to_habitat_euler(self.pose.orientation))
-        return spec
+        return rgb.native_sensor_spec(
+            name=self.name,
+            model=self.model,
+            needs_remap=self.needs_remap,
+            height=self.height,
+            width=self.width,
+            hfov=self.hfov,
+            pose=self.pose,
+            render_height=self.render_height,
+            render_width=self.render_width,
+        )
 
     def get_observation(
         self,
@@ -426,24 +289,17 @@ class CameraSensor(BaseSensor):
             ``Dict[str, List[OBB3D]]``.
         """
         outputs: Dict[str, object] = {}
-        if self._has_output("rgb"):
-            outputs["rgb"] = self._observe_rgb(sim)
+        if "rgb" in self.modalities:
+            outputs["rgb"] = rgb.observe(
+                sim,
+                name=self.name,
+                needs_remap=self.needs_remap,
+                src_cam=self.src_cam,
+                cam=self.cam,
+            )
         if self._raycast_outputs:
             outputs.update(self._observe_raycast(sim, motion_state))
         return outputs
-
-    # ------------------------------------------------------------------
-    # RGB
-    # ------------------------------------------------------------------
-    def _observe_rgb(self, sim: habitat_sim.Simulator) -> RGBImage:
-        obs = sim.get_sensor_observations()
-        if self.name not in obs:
-            return RGBImage(np.empty((0, 0), dtype=np.uint8))
-        image = obs[self.name]
-        if not self.needs_remap:
-            return RGBImage(image)
-        # Remap the equirectangular render to the target camera model.
-        return RGBImage(transition_camera_view(image, self.src_cam, self.cam))
 
     # ------------------------------------------------------------------
     # Ray casting (depth / semantic / instance, and reused by detections)
@@ -486,24 +342,18 @@ class CameraSensor(BaseSensor):
         if self.scene is None:
             raise RuntimeError("Camera raycast outputs require a Scene; no sim.cast_ray fallback is created.")
 
-        sensor_pos_global, q_sensor_global_xyzw = self.world_pose(motion_state)
-
-        # Rotate all local rays into the world frame; give invalid pixels (outside the
-        # model FOV) a placeholder direction so the batch is well-defined (masked out).
-        dirs = rotate_vectors(self._ray_dirs_local, q_sensor_global_xyzw).copy()
-        invalid = ~self._ray_valid
-        if np.any(invalid):
-            dirs[invalid] = (0.0, 0.0, -1.0)
-
         # The Scene is bound/synced once per capture by SensorSuite.observe;
         # the backend raises if queried unbound.
-        origins = np.broadcast_to(sensor_pos_global, dirs.shape)
-        res = self.scene.cast_rays(
-            origins, dirs,
+        world_pos, world_quat = self.world_pose(motion_state)
+        return raycast.cast(
+            self.scene,
+            ray_dirs_local=self._ray_dirs_local,
+            ray_valid=self._ray_valid,
+            world_pos=world_pos,
+            world_quat=world_quat,
             min_distance=self.min_distance,
             max_distance=self.max_distance,
         )
-        return res, (res.hit & self._ray_valid)
 
     def cast_ids(
         self, sim: habitat_sim.Simulator, motion_state: MotionState
@@ -519,9 +369,7 @@ class CameraSensor(BaseSensor):
             arrays with ``0`` for no hit.
         """
         res, hit = self._cast(sim, motion_state)
-        obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(self.height, self.width)
-        sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(self.height, self.width)
-        return InstanceMap(obj), SemanticMap(sem)
+        return raycast.id_maps(res, hit, self.height, self.width)
 
     def _ensure_detection_context(self, sim: habitat_sim.Simulator) -> None:
         categories = self.scene.categories
@@ -531,7 +379,7 @@ class CameraSensor(BaseSensor):
                 "has no category table; it must be bound to the sim (e.g. by "
                 "create_simulator) before capture."
             )
-        if self._world_obbs is None and self._has_output("bbox3d"):
+        if self._world_obbs is None and "bbox3d" in self.modalities:
             # Reuse the SceneModel the Scene already built in bind() (item 5);
             # only extract from scratch for backends that hold no model (e.g. sim).
             scene_model = self.scene.model
@@ -541,54 +389,39 @@ class CameraSensor(BaseSensor):
                 scene_model = extract_scene_model(sim, self.scene.geometry)
             self._world_obbs = global_obbs(scene_model, categories)
 
-    def _bbox2d_min_box_px(self) -> int:
-        det2d_cfg = self.modality_params.get("bbox2d", {})
-        return int(det2d_cfg.get("min_box_px", self.parameters.get("min_box_px", 8)))
-
     def _observe_raycast(
         self, sim: habitat_sim.Simulator, motion_state: MotionState
     ) -> Dict[str, object]:
+        """Cast once and derive every configured ray-cast output from it."""
         H, W = self.height, self.width
         res, hit = self._cast(sim, motion_state)
         outputs: Dict[str, object] = {}
-        obj = None
-        sem = None
 
-        def get_sem() -> SemanticMap:
-            nonlocal sem
-            if sem is None:
-                sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(H, W)
-            return SemanticMap(sem)
+        # Instance/semantic maps are shared by the map outputs and detections;
+        # build them once when any of those outputs is configured.
+        inst = sem = None
+        if self.modalities & {"semantic", "instance", "bbox2d", "bbox3d"}:
+            inst, sem = raycast.id_maps(res, hit, H, W)
 
-        def get_obj() -> InstanceMap:
-            nonlocal obj
-            if obj is None:
-                obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(H, W)
-            return InstanceMap(obj)
+        if "depth" in self.modalities:
+            outputs["depth"] = raycast.depth_map(
+                res, hit, self._ray_cos, self.depth_type, H, W
+            )
+        if "semantic" in self.modalities:
+            outputs["semantic"] = sem
+        if "instance" in self.modalities:
+            outputs["instance"] = inst
 
-        if self._has_output("depth"):
-            dist = np.where(hit, res.distance, 0.0).astype(np.float32)
-            if self.depth_type == "planar":
-                dist = (dist * self._ray_cos).astype(np.float32)
-            outputs["depth"] = DepthMap(dist.reshape(H, W))
-
-        if self._has_output("semantic"):
-            outputs["semantic"] = get_sem()
-
-        if self._has_output("instance"):
-            outputs["instance"] = get_obj()
-
-        if self._has_output("bbox2d"):
+        if "bbox2d" in self.modalities:
             self._ensure_detection_context(sim)
             outputs["bbox2d"] = boxes_from_maps(
-                get_obj(), get_sem(), self.scene.categories, self._bbox2d_min_box_px()
+                inst, sem, self.scene.categories, self.min_box_px
             )
-
-        if self._has_output("bbox3d"):
+        if "bbox3d" in self.modalities:
             self._ensure_detection_context(sim)
             cam_pos, cam_quat = self.world_pose(motion_state)
             outputs["bbox3d"] = obbs_for_visible(
-                get_obj(), self._world_obbs, cam_pos, cam_quat
+                inst, self._world_obbs, cam_pos, cam_quat
             )
 
         return outputs

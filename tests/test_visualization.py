@@ -157,7 +157,7 @@ class TestVisualizationSink(unittest.TestCase):
         ctx = StreamContext(scene_markers=[],
                             tf_manager=_FakeTF(),
                             sensors=[_fake_lidar(), _FakeSensor("imu", "imu", "imu_link")],
-                            sensor_outputs={"imu.imu": {"params": {}}})
+                            sensor_outputs=["imu.imu"])
         sink.on_start(ctx)
         layouts = [c[1] for c in backend.calls if c[0] == "layout"]
         self.assertEqual(layouts, [(sink.imu_path,)])  # one combined IMU window

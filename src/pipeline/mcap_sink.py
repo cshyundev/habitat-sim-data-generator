@@ -83,8 +83,7 @@ def _resolve_sensor_channels(
         export_config: Validated MCAP config.
 
     Returns:
-        Flattened mapping keyed by ``"<sensor>.<output>"`` with topic, schema,
-        and output params.
+        Flattened mapping keyed by ``"<sensor>.<output>"`` with topic and schema.
 
     Raises:
         ConfigError: If any declared sensor output has no MCAP channel config.
@@ -102,7 +101,6 @@ def _resolve_sensor_channels(
         channels[channel_key] = {
             "topic": channel.topic,
             "schema": channel.schema,
-            **ctx.sensor_outputs[channel_key],
         }
     return channels
 

@@ -114,7 +114,10 @@ class TestSensorSuiteInit(unittest.TestCase):
                  "outputs": {"point_cloud": {}},
                  "parameters": {"min_distance": 0.1, "max_distance": 30.0}},
                 {"link": "camera_link", "type": "camera", "hz": 5,
-                 "parameters": {"width": 640, "height": 480},
+                 "parameters": {
+                     "width": 640, "height": 480,
+                     "intrinsic": [500.0, 500.0, 320.0, 240.0],
+                 },
                  "outputs": {
                      "rgb": {},
                      "depth": {},

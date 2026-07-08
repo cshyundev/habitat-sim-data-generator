@@ -31,7 +31,7 @@ class StreamContext:
     scene_markers: List[dict]
     tf_manager: TFProvider
     sensors: List[BaseSensor]
-    sensor_outputs: Dict[str, Dict[str, object]] = field(default_factory=dict)
+    sensor_outputs: List[str] = field(default_factory=list)
     artifacts: Dict[str, object] = field(default_factory=dict)
     category_names: Optional[Dict[int, str]] = None
 

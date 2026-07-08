@@ -26,8 +26,9 @@ config-validation time, mirroring `validate_outputs`:
 - `IdealLiDAR3D` / `IdealLaser2D` / `IdealIMU` override it; `LiDAR3D` /
   `Laser2D` expose a `COMMON_PARAMETERS` set the concrete class unions in.
   `CameraSensor` validates against a model-dependent allowed set
-  (`_COMMON_PARAMETERS` + `_MODEL_PARAMETERS[model]`, mirroring `_build_model`),
-  and also rejects unknown/unsupported models up front.
+  (`_COMMON_PARAMETERS` + `model_parameter_keys(model)` from the model factory —
+  see the camera refactor note below), and also rejects unknown/unsupported
+  models up front.
 - `load_robot._load_sensor_specs` calls `validate_parameters(parameters)` next
   to `validate_outputs`, so typos (`max_distnace`), cross-model leftovers
   (`xi` on a pinhole), and non-positive distances fail as `ConfigError`.
@@ -38,6 +39,67 @@ config-validation time, mirroring `validate_outputs`:
 - Removed the dead `lidar_type: ideal` param from `assets/robots/sensors.yaml`
   and the two test fixtures (no code reads it — `type: lidar3d` already selects
   the class). Full suite green (139 tests).
+
+## Camera refactor — responsibility split across modules — DONE
+`CameraSensor` (552 lines) was a god-class: model construction, native RGB
+rasterization, ray-cast imaging, detection derivation, and calibration all in
+one file communicating via shared mutable attributes. Split by concern into
+plain module-level functions (no new classes — matching the
+`model_factory`/`detections` pattern already in the repo); `CameraSensor`
+(now 420 lines) is a thin coordinator holding state and orchestrating them.
+
+Modules (all under `src/sensors/camera/`):
+- `model_factory.py` (268): declarative `MODEL_SPECS` table is the single source
+  for both construction (`build_camera_model`) and validation
+  (`model_parameter_keys`). Replaced the ~100-line `_build_model` if/elif and the
+  hand-maintained `_MODEL_PARAMETERS` dict; `_required_param`/`_required_tuple_param`
+  and `_camera_intrinsic_values` moved here.
+- `rgb.py` (109): native RGB concern — `native_sensor_spec(...)` (habitat COLOR
+  spec) + `observe(...)` (native read + equirect remap).
+- `raycast.py` (116): ray-cast geometry — `precompute_rays`, `cast`, `depth_map`,
+  `id_maps`. The single-raycast invariant is now structural: `_observe_raycast`
+  casts once and reduces the one result into every output (replacing the lazy
+  get_sem/get_obj closures).
+- `camera.py.__init__` split into `_configure_geometry` / `_configure_outputs`
+  / `_configure_projection`; `get_sensor_spec`/RGB/`_cast`/`cast_ids`/
+  `_observe_raycast` delegate to the modules above.
+
+Contract preserved verbatim throughout: config params/outputs, validation
+key-sets (parity-checked vs a pre-refactor baseline), required-param error
+strings, `is_native`/spec resolution, single-raycast, public methods
+(`calibration_dict`/`cast_ids`/`world_pose`/`.cam`), bbox3d payload shape.
+New `tests/test_camera_model_factory.py` (8 tests) locks the factory contract;
+full suite green (147 tests).
+
+Follow-up (schema, dual read path): `depth_type` and `min_box_px` were readable
+from **two places** — per-output (`outputs.depth`/`outputs.bbox2d`) and the
+sensor's `parameters` — bridged by a back-fill in `robot_config`. Committed to a
+single source: the sensor's `parameters` (already validated by
+`validate_parameters`; matches the production config). Removed the back-fill,
+and outputs now reject any per-output config (`outputs take no parameters ...`)
+so the other path fails loud instead of being silently ignored. Camera reads
+`depth_type`/`min_box_px` from `parameters` only (`self.modality_params` gone).
+The per-output params machinery was then removed entirely: `SensorOutputSpec` is
+gone (`SensorSpec.outputs` is now a `List[str]` of names), `BaseSensor` dropped
+its `output_params` kwarg (`self.outputs` is a `Set[str]`), `SensorSuite.sensor_outputs()`
+returns a `List[str]` of `"<sensor>.<output>"` channel keys, `StreamContext.sensor_outputs`
+is a `List[str]`, and `mcap_sink` no longer merges per-output params into channels.
+
+Follow-up (contract change): `hfov` is no longer an accepted camera parameter.
+Pinhole/perspective now **require an intrinsic** (`intrinsic: [fx,fy,cx,cy]` or
+`focal_length` + `principal_point`); the FOV-derived fallback is gone. The
+native-RGB spec's hfov is **derived** from the intrinsic `fx`
+(`CameraSensor._native_hfov`), so rasterized RGB always matches the intrinsic
+the ray-cast path uses. `intrinsic` moved from the common key set to the
+pinhole/perspective model keys, so it is now rejected on other models. Other
+models (fisheye/doublesphere/omnidirect/equirect) never used hfov and are
+unchanged. Production config was already intrinsic-based (no hfov) — behavior
+identical. `build_camera_model` dropped its `hfov` parameter.
+
+Out of scope, filed for later: vendored `models/` latent bugs
+(`omnidirectional.py:138` exports `poly_coeffs` from `inv_poly_coeffs`;
+`CamType.from_string` round-trip / `THINPRISIM` misspelling). Not on the config
+path this refactor touches.
 
 ## P2 — BaseSensor pull-ups (do before adding the next sensor)
 

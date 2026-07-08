@@ -60,11 +60,13 @@ class TestCameraSensor(unittest.TestCase):
             sensor_type="camera",
             parent_link="camera_link",
             hz=10,
-            parameters={"model": "pinhole", "width": 2, "height": 2, "hfov": 90.0},
+            parameters={
+                "model": "pinhole", "width": 2, "height": 2,
+                "intrinsic": [1.0, 1.0, 0.5, 0.5], "min_box_px": 1,
+            },
             tf_manager=_TF(),
             scene=raycaster,
             output_names=["rgb", "depth", "semantic", "instance", "bbox2d", "bbox3d"],
-            output_params={"bbox2d": {"min_box_px": 1}},
         )
         raycaster.categories = {20: "chair"}
         cam._world_obbs = {

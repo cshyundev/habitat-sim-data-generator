@@ -94,8 +94,10 @@ class TestValid(_Base):
         camera = bundle.sensors[1]
         self.assertEqual(camera.parent_link, "camera_link")
         self.assertEqual(set(camera.outputs), {"rgb", "depth", "bbox2d"})
-        self.assertEqual(camera.outputs["depth"].params["depth_type"], "planar")
-        self.assertEqual(camera.outputs["bbox2d"].params["min_box_px"], 8)
+        # Output settings live on the sensor's parameters (single source);
+        # outputs are just declared names.
+        self.assertEqual(camera.parameters["depth_type"], "planar")
+        self.assertEqual(camera.parameters["min_box_px"], 8)
 
     def test_runtime_load(self):
         bundle = load_robot(self._config())

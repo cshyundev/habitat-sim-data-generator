@@ -25,7 +25,6 @@ def _make_imu(parameters=None, tf_manager=None) -> IdealIMU:
         parameters=parameters or {},
         tf_manager=tf_manager or _identity_tf_manager(),
         output_names=["imu"],
-        output_params={"imu": {}},
     )
 
 

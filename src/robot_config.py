@@ -28,14 +28,6 @@ class ConfigError(Exception):
 
 
 @dataclass
-class SensorOutputSpec:
-    """One declared sensor output and its per-output parameters."""
-
-    name: str
-    params: Dict[str, object] = field(default_factory=dict)
-
-
-@dataclass
 class SensorSpec:
     """Validated sensor spec consumed by ``SensorSuite``."""
 
@@ -44,7 +36,7 @@ class SensorSpec:
     parent_link: str
     hz: int
     parameters: Dict[str, object] = field(default_factory=dict)
-    outputs: Dict[str, SensorOutputSpec] = field(default_factory=dict)
+    outputs: List[str] = field(default_factory=list)  # declared output names
 
 
 @dataclass
@@ -181,7 +173,7 @@ def _load_sensor_specs(
         if not isinstance(raw_outputs, dict) or not raw_outputs:
             raise ConfigError(f"{ctx}.outputs: must be a non-empty mapping.")
 
-        outputs: Dict[str, SensorOutputSpec] = {}
+        outputs: List[str] = []
         for output_name, output_cfg in raw_outputs.items():
             output_key = str(output_name).lower()
             out_ctx = f"{ctx}.outputs.{output_key}"
@@ -193,18 +185,16 @@ def _load_sensor_specs(
                     f"{out_ctx}: export channels must live under "
                     "mcap_export.sensor_channels."
                 )
-            params = {
-                str(k): v
-                for k, v in output_cfg.items()
-            }
-            if output_key == "depth" and "depth_type" in parameters:
-                params.setdefault("depth_type", parameters["depth_type"])
-            if output_key == "bbox2d" and "min_box_px" in parameters:
-                params.setdefault("min_box_px", parameters["min_box_px"])
-            outputs[output_key] = SensorOutputSpec(
-                name=output_key,
-                params=dict(params),
-            )
+            # Outputs are declared as bare names. Per-output settings would be a
+            # second place to configure the sensor, so they are not accepted:
+            # sensor settings (e.g. depth_type, min_box_px) live only under the
+            # sensor's 'parameters'.
+            if output_cfg:
+                raise ConfigError(
+                    f"{out_ctx}: outputs take no parameters; put sensor settings "
+                    f"under the sensor's 'parameters'. Got: {sorted(output_cfg)}."
+                )
+            outputs.append(output_key)
 
         validate_outputs = getattr(sensor_cls, "validate_outputs", None)
         if validate_outputs is not None:

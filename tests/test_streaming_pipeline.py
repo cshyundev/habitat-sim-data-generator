@@ -43,7 +43,7 @@ class _SensorSuite:
     tf_manager = _TFManager()
 
     def sensor_outputs(self):
-        return {}
+        return []
 
     def reset_schedule(self, start_ns=0):
         pass
