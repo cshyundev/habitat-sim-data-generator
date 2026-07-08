@@ -19,7 +19,7 @@ VALID_SENSORS = [
     {
         "link": "lidar_link", "type": "lidar3d", "hz": 10,
         "outputs": {"point_cloud": {}},
-        "parameters": {"lidar_type": "ideal"},
+        "parameters": {"min_distance": 0.1, "max_distance": 30.0},
     },
     {
         "link": "imu_link", "type": "imu", "hz": 100,
@@ -74,7 +74,7 @@ class TestValid(_Base):
             {
                 "link": "lidar_link", "type": "lidar3d", "hz": 10,
                 "outputs": {"point_cloud": {}},
-                "parameters": {"lidar_type": "ideal"},
+                "parameters": {"min_distance": 0.1, "max_distance": 30.0},
             },
             {
                 "link": "camera_link", "type": "camera", "hz": 10,

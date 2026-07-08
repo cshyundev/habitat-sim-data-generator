@@ -11,6 +11,9 @@ from src.sensors.base_sensor import BaseSensor
 class Laser2D(BaseSensor, abc.ABC):
     """Abstract base class for custom 2D planar laser sensors."""
 
+    # Parameter keys every 2D laser reads; concrete subclasses union in their own.
+    COMMON_PARAMETERS = {"min_distance", "max_distance"}
+
     def __init__(self, **kwargs) -> None:
         """Initialize common 2D laser configuration."""
         super().__init__(**kwargs)

@@ -1,6 +1,8 @@
 from dataclasses import dataclass, asdict
 from typing import Dict
 
+from src.planners.params_util import require_positive, reject_unknown_keys
+
 
 @dataclass
 class DifferentialDriveParams:
@@ -21,6 +23,13 @@ class DifferentialDriveParams:
         planner_cfg = config.get("planner", {}) or {}
         local_cfg = planner_cfg.get("local", {}) or {}
         p_cfg = local_cfg.get("params", {}) or {}
+        ctx = "planner.local.params"
+        keys = (
+            "linear_velocity", "linear_acceleration",
+            "angular_velocity", "angular_acceleration",
+        )
+        reject_unknown_keys(p_cfg, keys, ctx)
+        require_positive(p_cfg, keys, ctx)
 
         return cls(
             linear_velocity=p_cfg.get("linear_velocity", 0.3),

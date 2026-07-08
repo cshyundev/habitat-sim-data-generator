@@ -42,6 +42,18 @@ class IdealIMU(BaseSensor):
         if set(outputs) != {"imu"}:
             raise ValueError("imu sensors must define exactly one output named 'imu'.")
 
+    @classmethod
+    def validate_parameters(cls, parameters: Dict[str, object]) -> None:
+        """Reject unknown/invalid IMU parameters at config time."""
+        if "apply_gravity" in parameters:
+            raise ValueError(
+                "IMU parameter 'apply_gravity' is not supported; use 'include_gravity'."
+            )
+        cls._reject_unknown_parameters(
+            parameters, {"include_gravity", "gravity_mps2"}, "imu"
+        )
+        cls._require_positive(parameters, ("gravity_mps2",), "imu")
+
     def is_native(self) -> bool:
         """Return whether this sensor is backed by a native Habitat sensor."""
         return False

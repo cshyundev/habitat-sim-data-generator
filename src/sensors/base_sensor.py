@@ -59,6 +59,45 @@ class BaseSensor(abc.ABC):
         """Validate sensor-specific output names. Subclasses may override."""
         return None
 
+    @classmethod
+    def validate_parameters(cls, parameters: Dict[str, object]) -> None:
+        """Reject unknown/invalid ``parameters:`` for this sensor type.
+
+        Called by ``load_robot`` at config-validation time (before the sim
+        exists), mirroring :meth:`validate_outputs`. The base does nothing;
+        subclasses that read a fixed key set should override and delegate to
+        :meth:`_reject_unknown_parameters` so a typo (``max_distnace``) fails
+        loudly instead of silently falling back to a default.
+        """
+        return None
+
+    @staticmethod
+    def _reject_unknown_parameters(
+        parameters: Dict[str, object],
+        allowed: set[str],
+        sensor_type: str,
+    ) -> None:
+        """Raise ``ValueError`` if ``parameters`` holds keys outside ``allowed``."""
+        unknown = sorted(set(parameters) - set(allowed))
+        if unknown:
+            raise ValueError(
+                f"{sensor_type} sensor: unknown parameter(s): "
+                f"{', '.join(unknown)}. Allowed: {', '.join(sorted(allowed))}."
+            )
+
+    @staticmethod
+    def _require_positive(parameters: Dict[str, object], keys, sensor_type: str) -> None:
+        """Raise ``ValueError`` if any present ``keys`` is non-numeric or <= 0."""
+        for key in keys:
+            if key not in parameters:
+                continue
+            value = parameters[key]
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+                raise ValueError(
+                    f"{sensor_type} sensor: parameter '{key}' must be a positive "
+                    f"number (got {value!r})."
+                )
+
     @abc.abstractmethod
     def is_native(self) -> bool:
         """

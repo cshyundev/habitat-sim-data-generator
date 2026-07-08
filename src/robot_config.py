@@ -213,6 +213,13 @@ def _load_sensor_specs(
             except ValueError as exc:
                 raise ConfigError(f"{ctx}: {exc}") from exc
 
+        validate_parameters = getattr(sensor_cls, "validate_parameters", None)
+        if validate_parameters is not None:
+            try:
+                validate_parameters(parameters)
+            except ValueError as exc:
+                raise ConfigError(f"{ctx}: {exc}") from exc
+
         specs.append(
             SensorSpec(
                 name=name,

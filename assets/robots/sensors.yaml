@@ -7,7 +7,6 @@ sensors:
     outputs:
       point_cloud: {}
     parameters:
-      lidar_type: ideal
       min_distance: 0.1
       max_distance: 30.0
       azimuth_range: [-180.0, 180.0]

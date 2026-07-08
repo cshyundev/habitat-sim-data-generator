@@ -26,6 +26,19 @@ class IdealLiDAR3D(LiDAR3D):
         # Precompute local ray directions
         self._compute_ray_directions()
 
+    @classmethod
+    def validate_parameters(cls, parameters):
+        """Reject unknown/invalid 3D-lidar parameters at config time."""
+        allowed = LiDAR3D.COMMON_PARAMETERS | {
+            "azimuth_range", "altitude_range", "azimuth_bins", "altitude_bins",
+        }
+        cls._reject_unknown_parameters(parameters, allowed, "lidar3d")
+        cls._require_positive(
+            parameters,
+            ("min_distance", "max_distance", "azimuth_bins", "altitude_bins"),
+            "lidar3d",
+        )
+
     def _compute_ray_directions(self):
         """
         Precompute the local ray direction unit vectors for all bins.

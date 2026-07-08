@@ -1,6 +1,8 @@
 from dataclasses import dataclass, asdict
 from typing import Dict
 
+from src.planners.params_util import require_positive, reject_unknown_keys
+
 
 @dataclass
 class ZigzagCoverageParams:
@@ -24,6 +26,14 @@ class ZigzagCoverageParams:
         planner_cfg = config.get("planner", {}) or {}
         global_cfg = planner_cfg.get("global", {}) or {}
         p_cfg = global_cfg.get("params", {}) or {}
+        ctx = "planner.global.params"
+        reject_unknown_keys(
+            p_cfg,
+            {"resolution", "wall_distance", "zigzag_spacing",
+             "sweep_direction", "start_corner"},
+            ctx,
+        )
+        require_positive(p_cfg, ("resolution", "wall_distance", "zigzag_spacing"), ctx)
         return cls(
             resolution=p_cfg.get("resolution", 0.05),
             wall_distance=p_cfg.get("wall_distance", 0.3),

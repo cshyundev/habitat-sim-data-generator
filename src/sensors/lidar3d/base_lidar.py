@@ -10,6 +10,10 @@ class LiDAR3D(BaseSensor, abc.ABC):
     """
     Abstract base class for custom 3D LiDAR sensors in habitat-sim.
     """
+
+    # Parameter keys every 3D lidar reads; concrete subclasses union in their own.
+    COMMON_PARAMETERS = {"min_distance", "max_distance"}
+
     def __init__(self, **kwargs):
         """
         Initialize the base LiDAR sensor. All shared sensor fields are forwarded

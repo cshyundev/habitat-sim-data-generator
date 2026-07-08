@@ -21,6 +21,15 @@ class IdealLaser2D(Laser2D):
         self.azimuth_bins = int(self.parameters.get("azimuth_bins", 720))
         self._compute_ray_directions()
 
+    @classmethod
+    def validate_parameters(cls, parameters):
+        """Reject unknown/invalid 2D-laser parameters at config time."""
+        allowed = Laser2D.COMMON_PARAMETERS | {"azimuth_range", "azimuth_bins"}
+        cls._reject_unknown_parameters(parameters, allowed, "laser2d")
+        cls._require_positive(
+            parameters, ("min_distance", "max_distance", "azimuth_bins"), "laser2d"
+        )
+
     def _compute_ray_directions(self) -> None:
         az_min, az_max = np.radians(self.azimuth_range)
         is_full_360 = (

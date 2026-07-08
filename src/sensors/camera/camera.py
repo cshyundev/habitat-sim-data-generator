@@ -147,6 +147,48 @@ class CameraSensor(BaseSensor):
                 f"{', '.join(unsupported)}. Available: {', '.join(sorted(allowed))}."
             )
 
+    # Parameter keys read regardless of projection model.
+    _COMMON_PARAMETERS = {
+        "model", "width", "height", "hfov", "intrinsic",
+        "min_distance", "max_distance", "depth_type", "render_height", "min_box_px",
+    }
+    # Extra keys each projection model reads (mirrors `_build_model`).
+    _MODEL_PARAMETERS = {
+        "pinhole": {"focal_length", "principal_point", "skew", "radial", "tangential"},
+        "perspective": {"focal_length", "principal_point", "skew", "radial", "tangential"},
+        "opencv_fisheye": {"focal_length", "principal_point", "skew", "radial"},
+        "thinprism": {"focal_length", "principal_point", "radial", "tangential", "prism"},
+        "doublesphere": {"focal_length", "principal_point", "xi", "alpha", "fov_deg"},
+        "omnidirect": {
+            "distortion_center", "poly_coeffs", "inv_poly_coeffs", "affine", "fov_deg",
+        },
+        "equirect": {"min_phi_deg", "max_phi_deg"},
+        "equirectangular": {"min_phi_deg", "max_phi_deg"},
+        "orthographic": set(),
+    }
+
+    @classmethod
+    def validate_parameters(cls, parameters: Dict[str, object]) -> None:
+        """Reject unknown/invalid camera parameters at config time.
+
+        The allowed key set is model-dependent: common keys plus the extras the
+        selected projection model reads. Required-but-missing model params are
+        still enforced later at construction (``_build_model``); this only
+        catches typos and cross-model leftovers up front.
+        """
+        model = str(parameters.get("model", "pinhole")).lower()
+        if model not in cls._MODEL_PARAMETERS:
+            raise ValueError(
+                f"camera sensor: unsupported model '{model}'. "
+                f"Available: {', '.join(sorted(cls._MODEL_PARAMETERS))}."
+            )
+        allowed = cls._COMMON_PARAMETERS | cls._MODEL_PARAMETERS[model]
+        cls._reject_unknown_parameters(parameters, allowed, f"camera[{model}]")
+        cls._require_positive(
+            parameters, ("width", "height", "hfov", "min_distance", "max_distance"),
+            "camera",
+        )
+
     def _has_output(self, output_name: str) -> bool:
         return output_name in self.modalities
 
