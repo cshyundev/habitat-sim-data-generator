@@ -6,9 +6,10 @@ from src.datatypes.motion_state import MotionState
 from src.datatypes.point_cloud import PointCloud
 from src.datatypes.imu import Imu
 from src.pipeline.sink import StreamContext, StreamEvent
+from src.raycasting.markers import SceneMarker
 from src.utils.coords import habitat_to_ros_pose
 from src.visualization.backend import VisualizationBackend
-from src.visualization.visualization_sink import VisualizationSink, _normalize_vertex_colors
+from src.visualization.visualization_sink import VisualizationSink
 
 
 class FakeBackend(VisualizationBackend):
@@ -96,35 +97,27 @@ def _event(firing, observations):
 
 
 class TestVisualizationSink(unittest.TestCase):
-    def test_normalize_vertex_colors_shapes(self):
-        # Per-vertex (V,4) -> (V,3).
-        per_vertex = np.tile([10, 20, 30, 255], (4, 1))
-        out = _normalize_vertex_colors(per_vertex, 4)
-        self.assertEqual(out.shape, (4, 3))
-        # Single RGBA (1-D) -> broadcast to all vertices (the real-scene case).
-        out1 = _normalize_vertex_colors(np.array([10, 20, 30, 255]), 5)
-        self.assertEqual(out1.shape, (5, 3))
-        self.assertTrue(np.all(out1 == [10, 20, 30]))
-        # Mismatched 2-D row count -> broadcast first row.
-        mism = np.tile([7, 8, 9, 255], (2, 1))
-        out2 = _normalize_vertex_colors(mism, 6)
-        self.assertEqual(out2.shape, (6, 3))
-        # None / empty -> None.
-        self.assertIsNone(_normalize_vertex_colors(None, 3))
-        self.assertIsNone(_normalize_vertex_colors(np.array([]), 3))
-
-    def test_on_start_handles_single_rgba_marker(self):
+    def test_on_start_logs_marker_with_vertex_colors(self):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
-        # marker with a single 1-D RGBA color (as produced for some scene meshes).
-        markers = [{
-            "ns": "object", "id": 3,
-            "vertices": np.zeros((4, 3), dtype=np.float32),
-            "vertex_colors": np.array([150, 150, 150, 255]),
-            "indices": [[0, 1, 2]],
-            "position": np.zeros(3), "orientation": np.array([0.0, 0.0, 0.0, 1.0]),
-            "scale": np.ones(3),
-        }]
+        markers = [SceneMarker(
+            ns="rigid", id=3,
+            vertices=np.zeros((4, 3), dtype=np.float32),
+            vertex_colors=np.tile([150, 150, 150], (4, 1)).astype(np.uint8),
+        )]
+        ctx = StreamContext(scene_markers=markers,
+                            tf_manager=_FakeTF(), sensors=[])
+        sink.on_start(ctx)  # must not raise
+        self.assertEqual(backend.paths("mesh"), ["world/scene/rigid_3"])
+
+    def test_on_start_handles_marker_with_no_vertex_colors(self):
+        backend = FakeBackend()
+        sink = VisualizationSink(backend)
+        markers = [SceneMarker(
+            ns="object", id=3,
+            vertices=np.zeros((4, 3), dtype=np.float32),
+            vertex_colors=None,
+        )]
         ctx = StreamContext(scene_markers=markers,
                             tf_manager=_FakeTF(), sensors=[])
         sink.on_start(ctx)  # must not raise
@@ -133,13 +126,11 @@ class TestVisualizationSink(unittest.TestCase):
     def test_on_start_logs_axes_scene_and_sensor_frames(self):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
-        markers = [{
-            "ns": "stage", "id": 0,
-            "vertices": np.zeros((3, 3), dtype=np.float32),
-            "vertex_colors": np.tile([200, 200, 200, 255], (3, 1)),
-            "position": np.zeros(3), "orientation": np.array([0.0, 0.0, 0.0, 1.0]),
-            "scale": np.ones(3),
-        }]
+        markers = [SceneMarker(
+            ns="stage", id=0,
+            vertices=np.zeros((3, 3), dtype=np.float32),
+            vertex_colors=np.tile([200, 200, 200], (3, 1)).astype(np.uint8),
+        )]
         ctx = StreamContext(
             scene_markers=markers,
             tf_manager=_FakeTF(),

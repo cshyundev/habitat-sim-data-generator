@@ -13,7 +13,7 @@ the one thing that's genuinely its own: the static per-sensor mount frames in
 ``on_start``, which nothing else needs.
 """
 import numpy as np
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, TYPE_CHECKING
 
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
 from src.visualization.backend import VisualizationBackend
@@ -30,29 +30,6 @@ def _class_color(class_id: int) -> List[int]:
     """Stable pseudo-random RGB color per semantic class id."""
     rng = np.random.default_rng((int(class_id) * 2654435761) % (2 ** 32))
     return [int(x) for x in rng.integers(60, 256, 3)]
-
-
-def _normalize_vertex_colors(colors: object, n_vertices: int) -> Optional[np.ndarray]:
-    """
-    Normalizes marker vertex colors to (n_vertices, 3) uint8, or None.
-
-    Mirrors the export serializer: colors may be a single RGBA (1-D, len>=3),
-    a per-vertex (V,4)/(V,3) array, or mismatched row count -- all handled by
-    broadcasting a single color when needed.
-    """
-    if colors is None:
-        return None
-    arr = np.asarray(colors)
-    if arr.size == 0:
-        return None
-    if arr.ndim == 1:
-        if arr.shape[0] < 3:
-            return None
-        return np.tile(arr[:3].astype(np.uint8), (n_vertices, 1))
-    # 2-D
-    if arr.shape[0] != n_vertices:
-        return np.tile(arr[0, :3].astype(np.uint8), (n_vertices, 1))
-    return arr[:, :3].astype(np.uint8)
 
 
 class VisualizationSink(StreamSink):
@@ -108,23 +85,19 @@ class VisualizationSink(StreamSink):
 
         self.backend.log_axes(f"{self.robot_path}/axes", length=0.3)
 
-        # Static scene geometry (skipped cleanly if there is none).
+        # Static scene geometry (skipped cleanly if there is none). Marker
+        # vertices are already a flat triangle soup (SceneMarker contract), so
+        # there is no index buffer to pass along.
         for marker in ctx.scene_markers:
-            path = f"{self.scene_path}/{marker['ns']}_{marker['id']}"
-            vertices = np.asarray(marker["vertices"], dtype=np.float32)
-            vertex_colors = _normalize_vertex_colors(marker.get("vertex_colors"), len(vertices))
-            indices = marker.get("indices")
-            triangle_indices = (
-                None if not indices else np.asarray(indices, dtype=np.uint32)
-            )
+            path = f"{self.scene_path}/{marker.ns}_{marker.id}"
             self.backend.log_static_mesh(
                 path=path,
-                vertices=vertices,
-                colors=vertex_colors,
-                translation=np.asarray(marker["position"], dtype=np.float32),
-                rotation_xyzw=np.asarray(marker["orientation"], dtype=np.float32),
-                scale=np.asarray(marker["scale"], dtype=np.float32),
-                triangle_indices=triangle_indices,
+                vertices=marker.vertices,
+                colors=marker.vertex_colors,
+                translation=marker.position,
+                rotation_xyzw=marker.orientation,
+                scale=marker.scale,
+                triangle_indices=None,
             )
 
         # Static sensor-mount frames under the robot, so spatial sensor data is

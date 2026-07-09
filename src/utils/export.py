@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 from mcap_ros2.writer import Writer as Ros2Writer
@@ -8,6 +8,7 @@ from src.datatypes.pose import Pose3D
 from src.datatypes.point_cloud import PointCloud
 from src.datatypes.laser_scan import LaserScan
 from src.datatypes.bbox import Detection2D, OBB3D
+from src.raycasting.markers import SceneMarker
 from src.runtime_config import McapExportConfig
 from src.utils.ros_msgdefs import MSGDEFS
 
@@ -33,69 +34,41 @@ def _quat(v: Sequence[float]) -> RosMessage:
     return {"x": float(v[0]), "y": float(v[1]), "z": float(v[2]), "w": float(v[3])}
 
 
-def _unroll_marker_geometry(marker_info: Dict[str, object]) -> Tuple[np.ndarray, np.ndarray]:
-    """Expands a marker's (vertices, indices) mesh into a flat point/color list,
-    matching the ``visualization_msgs/Marker`` TRIANGLE_LIST convention (one
-    entry per triangle-list vertex, no shared index buffer on the wire)."""
-    vertices = np.asarray(marker_info["vertices"])
-    indices = marker_info["indices"]
-    if len(indices) > 0:
-        unrolled_points = vertices[np.array(indices).flatten()]
-    else:
-        unrolled_points = vertices
-
-    vertex_colors = marker_info.get("vertex_colors")
-    if vertex_colors is not None and len(vertex_colors) > 0:
-        v_cols = np.array(vertex_colors)
-        if v_cols.ndim == 1 and len(v_cols) == 4:
-            v_cols = np.tile(v_cols, (len(vertices), 1))
-        elif v_cols.ndim == 2 and v_cols.shape[0] != len(vertices):
-            if v_cols.shape[0] > 0:
-                v_cols = np.tile(v_cols[0], (len(vertices), 1))
-            else:
-                v_cols = np.tile([150, 150, 150, 255], (len(vertices), 1))
-
-        unrolled_colors = (
-            v_cols[np.array(indices).flatten()] if len(indices) > 0 else v_cols
-        )
-    else:
-        unrolled_colors = np.zeros((0, 4))
-
-    return unrolled_points, unrolled_colors
-
-
 def _marker_message(
-    marker_info: Dict[str, object],
+    marker: SceneMarker,
     timestamp_ns: int,
     frame_id: str,
 ) -> RosMessage:
-    pts, cols = _unroll_marker_geometry(marker_info)
-    points = [_point(p) for p in pts]
-    colors = [
-        {
-            "r": float(c[0]) / 255.0,
-            "g": float(c[1]) / 255.0,
-            "b": float(c[2]) / 255.0,
-            "a": float(c[3]) / 255.0,
-        }
-        for c in cols
-    ]
+    """Build a ``visualization_msgs/Marker`` message from a :class:`SceneMarker`.
+
+    ``marker.vertices``/``marker.vertex_colors`` are already one entry per
+    triangle-list vertex (no shared index buffer) -- the shape the wire
+    message wants -- so there is nothing left to unroll here.
+    """
+    points = [_point(p) for p in marker.vertices]
+    if marker.vertex_colors is not None and len(marker.vertex_colors) == len(marker.vertices):
+        colors = [
+            {"r": float(c[0]) / 255.0, "g": float(c[1]) / 255.0, "b": float(c[2]) / 255.0, "a": 1.0}
+            for c in marker.vertex_colors
+        ]
+    else:
+        colors = []
     return {
         "header": _header(timestamp_ns, frame_id),
-        "ns": marker_info["ns"],
-        "id": int(marker_info["id"]),
-        "type": int(marker_info["type"]),
+        "ns": marker.ns,
+        "id": int(marker.id),
+        "type": int(marker.type),
         "action": 0,  # ADD
         "pose": {
-            "position": _point(marker_info["position"]),
-            "orientation": _quat(marker_info["orientation"]),
+            "position": _point(marker.position),
+            "orientation": _quat(marker.orientation),
         },
-        "scale": _point(marker_info["scale"]),
+        "scale": _point(marker.scale),
         "color": {
-            "r": float(marker_info["r"]),
-            "g": float(marker_info["g"]),
-            "b": float(marker_info["b"]),
-            "a": float(marker_info["a"]),
+            "r": float(marker.r),
+            "g": float(marker.g),
+            "b": float(marker.b),
+            "a": float(marker.a),
         },
         "lifetime": {"sec": 0, "nanosec": 0},
         "frame_locked": False,
@@ -386,14 +359,14 @@ class McapExporter:
 
     def write_map_3d_marker_array(
         self, timestamp_ns: int, frame_id: str,
-        markers_list: List[dict]
+        markers_list: List[SceneMarker]
     ) -> None:
         """Write a ``visualization_msgs/msg/MarkerArray`` scene message.
 
         Args:
             timestamp_ns: Message timestamp in nanoseconds.
             frame_id: Header frame id assigned to each marker.
-            markers_list: Marker dictionaries produced by scene extraction.
+            markers_list: Scene markers produced by scene extraction.
         """
         self._write("map_3d_marker_array", timestamp_ns, {
             "markers": [_marker_message(m, timestamp_ns, frame_id) for m in markers_list],

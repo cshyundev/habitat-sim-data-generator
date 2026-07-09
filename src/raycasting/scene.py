@@ -14,7 +14,7 @@ per-instance list plus the parallel arrays of mutable state.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 
@@ -44,6 +44,13 @@ class ObjectMesh:
         semantic_id: habitat semantic class id.
         mesh_key: identity of the underlying geometry (asset path + scale); two
             instances with the same key share one acceleration structure (BLAS).
+        source: which extraction path produced this mesh -- ``"stage"``,
+            ``"rigid"``, or ``"articulated"``. Cosmetic (used to label scene
+            markers derived from the model), not read by ray-casting.
+        vertex_colors: ``uint8[Fi, 3, 3]`` RGB, aligned 1:1 with ``local_verts``
+            (same triangle-soup layout), or ``None`` if the asset carries no
+            material/vertex-color info. Unused by ray-casting; carried so scene
+            markers can be derived from this mesh without a second mesh load.
     """
 
     local_verts: np.ndarray
@@ -51,6 +58,8 @@ class ObjectMesh:
     object_id: int
     semantic_id: int
     mesh_key: str
+    source: str = "rigid"
+    vertex_colors: Optional[np.ndarray] = None
 
     @property
     def num_triangles(self) -> int:

@@ -14,6 +14,7 @@ from src.utils.export import McapExporter
 from src.runtime_config import McapExportConfig
 from src.pipeline.mcap_sink import McapSink, collect_calibrations, write_sidecar_yaml, _sidecar_path
 from src.pipeline.sink import StreamContext
+from src.raycasting.markers import SceneMarker
 from src.sensors.export_helper import export_sensor_data
 from src.datatypes.pose import Pose3D
 from src.datatypes.point_cloud import PointCloud
@@ -80,15 +81,11 @@ class TestMcapExportRoundTrip(unittest.TestCase):
         grid = np.array([[-1, 0, 100], [0, 100, -1]], dtype=np.int8)
         exp.write_occupancy_grid(0, "map", resolution=0.05, width=3, height=2, origin_pose=pose, grid_data=grid)
 
-        markers = [{
-            "ns": "stage", "id": 0, "type": 11,
-            "position": np.array([0.0, 0.0, 0.0]), "orientation": np.array([0.0, 0.0, 0.0, 1.0]),
-            "scale": np.array([1.0, 1.0, 1.0]),
-            "vertices": np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float64),
-            "indices": [[0, 1, 2]],
-            "vertex_colors": np.array([[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]]),
-            "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0,
-        }]
+        markers = [SceneMarker(
+            ns="stage", id=0,
+            vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32),
+            vertex_colors=np.array([[255, 0, 0], [0, 255, 0], [0, 0, 255]], dtype=np.uint8),
+        )]
         exp.write_map_3d_marker_array(0, "map", markers)
 
         d2 = [Detection2D(instance_id=1, class_id=2, class_name="chair", xyxy=(1, 2, 3, 4))]

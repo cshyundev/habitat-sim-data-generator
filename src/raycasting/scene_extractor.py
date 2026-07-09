@@ -59,9 +59,36 @@ _MT_MAP = {
 # ---------------------------------------------------------------------------
 # Mesh loading helpers
 # ---------------------------------------------------------------------------
-def _load_triangles(path: str) -> Optional[np.ndarray]:
-    """Load ``path`` as a single mesh -> ``float64[F, 3, 3]`` local triangles, or
-    ``None`` if it cannot be loaded / has no faces."""
+LoadedMesh = Tuple[np.ndarray, Optional[np.ndarray]]
+
+
+def _mesh_vertex_colors(mesh, num_verts: int) -> Optional[np.ndarray]:
+    """Best-effort per-vertex RGB ``uint8[V, 3]`` for ``mesh``, or ``None``.
+
+    ``trimesh``'s ``.visual.to_color()`` normally returns one RGBA per vertex,
+    but can also hand back a single flat color (no material/texture) or -- for
+    a malformed asset -- a row count that doesn't match the mesh. Broadcast the
+    former, drop the latter (raycasting never needed colors so nothing depended
+    on this before; scene markers fall back to a flat marker color when this is
+    ``None``).
+    """
+    try:
+        vc = np.asarray(mesh.visual.to_color().vertex_colors, dtype=np.uint8)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("No vertex colors for mesh: %s", exc)
+        return None
+    if vc.ndim == 1 and vc.shape[0] >= 3:
+        return np.tile(vc[:3], (num_verts, 1))
+    if vc.ndim == 2 and vc.shape[0] == num_verts:
+        return vc[:, :3].copy()
+    return None
+
+
+def _load_triangles(path: str) -> Optional[LoadedMesh]:
+    """Load ``path`` as a single mesh -> ``(float64[F, 3, 3] triangles,
+    uint8[F, 3, 3] colors or None)``, or ``None`` if it cannot be loaded / has
+    no faces. Colors are extracted in the same load so scene markers never
+    need a second read of the same asset."""
     if not path or not os.path.exists(path):
         return None
     try:
@@ -73,7 +100,9 @@ def _load_triangles(path: str) -> Optional[np.ndarray]:
     verts = np.asarray(getattr(mesh, "vertices", []), dtype=np.float64)
     if faces.size == 0 or verts.size == 0:
         return None
-    return verts[faces]  # (F, 3, 3)
+    vertex_colors = _mesh_vertex_colors(mesh, verts.shape[0])
+    colors = vertex_colors[faces] if vertex_colors is not None else None  # (F, 3, 3)
+    return verts[faces], colors  # (F, 3, 3)
 
 
 def _apply_transform(tris: np.ndarray, matrix: np.ndarray) -> np.ndarray:
@@ -84,13 +113,16 @@ def _apply_transform(tris: np.ndarray, matrix: np.ndarray) -> np.ndarray:
     return out.reshape(tris.shape)
 
 
-def _finalize(local: np.ndarray) -> Optional[Tuple[np.ndarray, np.ndarray]]:
-    """Drop non-finite triangles and return (verts f32, face_normals f32)."""
+def _finalize(
+    local: np.ndarray, colors: Optional[np.ndarray]
+) -> Optional[Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]]:
+    """Drop non-finite triangles and return (verts f32, face_normals f32, colors)."""
     finite = np.isfinite(local).all(axis=(1, 2))
     local = local[finite]
     if local.shape[0] == 0:
         return None
-    return local.astype(np.float32), face_normals(local).astype(np.float32)
+    colors_out = colors[finite] if colors is not None else None
+    return local.astype(np.float32), face_normals(local).astype(np.float32), colors_out
 
 
 def _asset_path(attrs, geometry: str) -> str:
@@ -177,21 +209,25 @@ class _Builder:
     def add(
         self,
         mesh_key: str,
-        local_loader: Callable[[], Optional[np.ndarray]],
+        local_loader: Callable[[], Optional[LoadedMesh]],
         transform: np.ndarray,
         object_id: int,
         semantic_id: int,
         motion: int,
+        source: str,
     ) -> None:
         """Add one scene instance, loading and caching its local mesh if needed."""
         om = self._mesh_cache.get(mesh_key)
         if om is None:
             local = local_loader()
-            fin = _finalize(local) if local is not None else None
+            fin = _finalize(*local) if local is not None else None
             if fin is None:
                 return
-            verts, normals = fin
-            om = ObjectMesh(verts, normals, int(object_id), int(semantic_id), mesh_key)
+            verts, normals, colors = fin
+            om = ObjectMesh(
+                verts, normals, int(object_id), int(semantic_id), mesh_key,
+                source=source, vertex_colors=colors,
+            )
             self._mesh_cache[mesh_key] = om
         self.objects.append(om)
         self.transforms.append(np.asarray(transform, dtype=np.float32))
@@ -214,6 +250,7 @@ def _add_stage(sim, geometry: str, b: _Builder) -> None:
         object_id=stage_id,
         semantic_id=0,
         motion=STATIC,
+        source="stage",
     )
 
 
@@ -226,26 +263,37 @@ def _add_rigid_objects(sim, geometry: str, b: _Builder) -> None:
         b.add(
             mesh_key=f"{path}|{tuple(np.round(scale, 6))}",
             local_loader=lambda p=path, s=scale: (
-                None if (_t := _load_triangles(p)) is None else _t * s[None, None, :]
+                None if (_t := _load_triangles(p)) is None
+                else (_t[0] * s[None, None, :], _t[1])
             ),
             transform=np.asarray(obj.transformation, dtype=np.float32),
             object_id=obj.object_id,
             semantic_id=int(getattr(obj, "semantic_id", 0)),
             motion=_MT_MAP.get(obj.motion_type, DYNAMIC),
+            source="rigid",
         )
 
 
-def _link_local_mesh(visuals: List[UrdfVisual]) -> Optional[np.ndarray]:
+_GRAY = (102, 102, 102)  # trimesh's own default when a mesh has no material
+
+
+def _link_local_mesh(visuals: List[UrdfVisual]) -> Optional[LoadedMesh]:
     """Merge a link's URDF visuals into one local-frame triangle array."""
-    parts: List[np.ndarray] = []
+    tri_parts: List[np.ndarray] = []
+    col_parts: List[np.ndarray] = []
     for mesh_path, scale, origin in visuals:
-        tris = _load_triangles(mesh_path)
-        if tris is None:
+        loaded = _load_triangles(mesh_path)
+        if loaded is None:
             continue
-        parts.append(_apply_transform(tris * scale[None, None, :], origin))
-    if not parts:
+        tris, colors = loaded
+        tri_parts.append(_apply_transform(tris * scale[None, None, :], origin))
+        col_parts.append(
+            colors if colors is not None
+            else np.full((*tris.shape[:2], 3), _GRAY, dtype=np.uint8)
+        )
+    if not tri_parts:
         return None
-    return np.concatenate(parts, axis=0)
+    return np.concatenate(tri_parts, axis=0), np.concatenate(col_parts, axis=0)
 
 
 def _add_articulated_objects(sim, b: _Builder) -> None:
@@ -283,6 +331,7 @@ def _add_articulated_objects(sim, b: _Builder) -> None:
                 object_id=int(link_to_obj.get(link_id, ao.object_id)),
                 semantic_id=semantic,
                 motion=motion,
+                source="articulated",
             )
 
 

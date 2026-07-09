@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Protocol
 
 from src.datatypes.motion_state import MotionState
 from src.datatypes.pose import Pose3D
+from src.raycasting.markers import SceneMarker
 from src.sensors.base_sensor import BaseSensor
 
 
@@ -28,7 +29,7 @@ class TFProvider(Protocol):
 @dataclass
 class StreamContext:
     """One-time context handed to each sink at the start of a run."""
-    scene_markers: List[dict]
+    scene_markers: List[SceneMarker]
     tf_manager: TFProvider
     sensors: List[BaseSensor]
     root_link: str = "base_link"

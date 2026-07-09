@@ -13,7 +13,9 @@ from typing import Dict, List, Optional
 from src.datatypes.pose import Pose3D
 from src.sensors.suite import SensorSuite
 from src.utils.habitat import pose_to_agent_state
-from src.utils.coords import extract_visual_map_as_markers, habitat_to_ros_pose
+from src.utils.coords import habitat_to_ros_pose
+from src.raycasting.markers import SceneMarker, derive_scene_markers
+from src.raycasting.scene_extractor import extract_scene_model
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
 from src.planners.global_planning import BaseGlobalPlanner
 from src.planners.local_planning import BaseLocalPlanner
@@ -42,7 +44,7 @@ class StreamingPipeline:
         sensor_suite: SensorSuite,
         global_planner: BaseGlobalPlanner,
         local_planner: BaseLocalPlanner,
-        scene_markers: List[dict],
+        scene_markers: List[SceneMarker],
         category_names: Optional[Dict[int, str]] = None,
         max_duration_ns: Optional[int] = None,
     ):
@@ -53,7 +55,7 @@ class StreamingPipeline:
             sensor_suite: Sensor suite bound to the same robot config.
             global_planner: Planner that produces coarse waypoints.
             local_planner: Planner that turns waypoints into timestamped motion.
-            scene_markers: ROS marker dictionaries for static scene export.
+            scene_markers: Static scene geometry as ROS markers.
             category_names: Semantic category table for metadata sidecars.
             max_duration_ns: Optional cap on emitted trajectory duration.
         """
@@ -160,9 +162,9 @@ def build_pipeline(
     """Build a ready-to-run streaming pipeline.
 
     Args:
-        runtime_config: Validated config (parsed once at the entry point). Planners,
-            the trajectory cap, and the scene-dataset path are read from its typed
-            slices -- the pipeline never sees the raw dict.
+        runtime_config: Validated config (parsed once at the entry point). Planners
+            and the trajectory cap are read from its typed slices -- the pipeline
+            never sees the raw dict.
         sim: Habitat simulator instance.
         sensor_suite: Sensor suite attached to ``sim``.
 
@@ -171,18 +173,27 @@ def build_pipeline(
         duration cap wired in.
 
     Raises:
-        RuntimeError: If scene marker extraction fails before the pipeline is
+        RuntimeError: If scene geometry extraction fails before the pipeline is
             constructed.
     """
     global_planner, local_planner = build_planners(runtime_config.planner)
 
-    scene_markers = extract_visual_map_as_markers(
-        sim, runtime_config.scene_dataset_config_file
-    )
+    # Scene markers always want the "visual" (render) mesh set, regardless of the
+    # backend's raycasting.geometry config. Reuse the SceneModel the Scene already
+    # built in bind() when it already is "visual" (no second mesh load); extract
+    # fresh only for a "collision" geometry config or a backend that holds no
+    # model at all (the sim backend) -- same fallback shape as the camera's
+    # bbox3d path (CameraSensor._ensure_detection_context).
+    scene = sensor_suite.scene
+    scene_model = scene.model
+    if scene_model is None or scene.geometry != "visual":
+        scene_model = extract_scene_model(sim, "visual")
+    scene_markers = derive_scene_markers(scene_model)
+
     # The category table is owned by the shared Scene (built once when it was
     # bound to the sim); read it here for the MCAP metadata sidecar. Sensors read
     # it straight off the Scene, so nothing is injected per sensor.
-    categories = sensor_suite.scene.categories or {}
+    categories = scene.categories or {}
 
     return StreamingPipeline(
         sim=sim,

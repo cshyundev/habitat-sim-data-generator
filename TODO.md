@@ -259,19 +259,57 @@ green (152 tests).
 
 ## P5 — Carried over from Round 2 (verified still open)
 
-### 10. Scene mesh loading consolidation (Round 2 item 5, the "larger task")
-`extract_visual_map_as_markers` (`src/utils/coords.py:230`) still loads
-stage+rigid+articulated meshes a second time (trimesh) in a different output
-shape, and `parse_urdf_visuals` still exists twice (`coords.py:147` public vs
-`scene_extractor.py:136` private). Make `SceneModel` the single source and
-derive the ROS markers from it; dedupe the URDF-visuals parser; relocate the
-scene/mesh logic out of `coords.py` (which should keep only pure coordinate
-transforms + occupancy conversion). Fold in while there:
-- `resolve_urdf_path` (`coords.py:202`) hardcodes cwd-relative
-  `habitat-sim/data/replica_cad` paths — brittle and ReplicaCAD-specific.
-- The marker contract is a `List[dict]` with string keys and a magic
-  `'type': 11` shared by `export.py` and `visualization_sink.py` — type it
-  with a small `SceneMarker` dataclass when the markers are re-derived.
+### 10. Scene mesh loading consolidation (Round 2 item 5, the "larger task") — DONE
+`extract_visual_map_as_markers` (formerly `coords.py:230`) loaded
+stage+rigid+articulated meshes a second time (trimesh) on every run using the
+GPU raycasting backend, on top of the load `extract_scene_model` already did
+to build the `SceneModel` in `Scene.bind()` — and `parse_urdf_visuals` existed
+twice (public `coords.py` vs private `scene_extractor.py`) with diverging
+behavior (empty-link handling, per-visual vs per-link merging).
+
+`SceneModel`/`ObjectMesh` (`src/raycasting/scene.py`) is now the single
+source: `ObjectMesh` gained `vertex_colors` (loaded in the same
+`trimesh.load` call as the raycasting triangles, in `_load_triangles`/
+`_finalize`, `scene_extractor.py`) and `source` ("stage"/"rigid"/
+"articulated", for marker namespacing) — both cosmetic/marker-only, unread by
+ray-casting. New `src/raycasting/markers.py` (`SceneMarker` dataclass +
+`derive_scene_markers(model)`) turns each `SceneModel` instance into one
+marker with **no extra mesh load and no vertex baking**: since the
+Habitat->ROS basis change is a pure rotation, it commutes with the instance's
+world transform, so the local-frame triangle soup is rotated Habitat->ROS
+in place and placed via `position`/`orientation` (`matrix_to_pose_components`
++ `habitat_to_ros_pose`) exactly like a rigid body in a ROS scene graph —
+proven algebraically and covered by
+`test_scene_markers.py::test_transformed_instance_reproduces_world_vertices_in_ros_frame`.
+
+`build_pipeline` (`streaming.py`) reuses `sensor_suite.scene.model` when it's
+already `geometry="visual"` (zero extra loads — the common case); it only
+calls `extract_scene_model(sim, "visual")` fresh for a `geometry="collision"`
+raycasting config or the `sim` backend (which holds no model) — same
+reuse-or-fallback shape already used by `CameraSensor._ensure_detection_context`
+for bbox3d. The old `resolve_urdf_path` (ReplicaCAD-hardcoded cwd-relative
+path guessing) is gone entirely: the single loader now always uses habitat's
+own resolved absolute paths (`render_asset_fullpath`/`urdf_fullpath`), so it's
+no longer dataset-specific.
+
+Markers are now typed (`SceneMarker`, `src/raycasting/markers.py`) instead of
+a `List[dict]` with string keys — `export.py`'s `_marker_message` and
+`visualization_sink.py`'s marker loop both take `SceneMarker` directly.
+Since `SceneMarker.vertices` is already one entry per triangle-list vertex
+(the local triangle-soup layout `ObjectMesh` already used for raycasting),
+`export.py`'s `_unroll_marker_geometry` (index-buffer expansion +
+mismatched-color-shape broadcasting) is gone — there's nothing left to
+unroll, and the color-shape defensiveness moved to the single load site
+(`_mesh_vertex_colors`, `scene_extractor.py`). `coords.py` is now exactly
+"pure coordinate transforms + occupancy conversion" as intended; `rpy_to_matrix`
+was only re-exported from there for `robot.py`, which now imports it directly
+from `geometry.py`. `src/utils/coords.py` is imported before anything else
+touches `src.datatypes` in a couple of new call chains (`markers.py`); reordered
+`markers.py`'s own imports (`Pose3D` before `coords`) to avoid tripping the
+pre-existing `coords.py` <-> `src.datatypes.map` import cycle. Full suite green
+(158 tests; new `test_scene_markers.py` covers the math, existing
+`test_mcap_export.py`/`test_visualization.py` updated to the `SceneMarker`
+contract).
 
 ### 11. Config/doc leftovers (Round 2 item 13, minus the base_link key → item 9)
 - `config/config_stream.yaml:2` header references `generate_data.py` /

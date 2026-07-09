@@ -26,9 +26,8 @@ import numpy as np
 from src.utils.coords import (
     ros_to_habitat_position,
     ros_to_habitat_quaternion,
-    rpy_to_matrix,
 )
-from src.utils.geometry import rpy_to_quaternion
+from src.utils.geometry import rpy_to_matrix, rpy_to_quaternion
 
 
 # ---------------------------------------------------------------------------
