@@ -126,17 +126,21 @@ so a YAML string value now coerces consistently everywhere (camera keeps its
 
 ## P3 — Dead code
 
-### 5. `create_global_planner` / `create_local_planner` — unused dual API
+### 5. `create_global_planner` / `create_local_planner` — unused dual API — KEPT
 **Where:** `src/planners/registry.py`.
-Zero call sites outside the registry; the typed `build_planners` path is the
-only real consumer (`parse_*_params` stays — `PlannerConfig.from_config` uses
-it). Two entry paths to the same construction is the "two ways to say the
-same thing" smell Round 2 item 14 removed from the MCAP config. Delete both.
+Zero call sites outside the registry itself and its tests; the typed
+`build_planners` path is the only real production consumer (`parse_*_params`
+stays — `PlannerConfig.from_config` uses it). Decision: keep both functions
+as a public direct-construction entry point for future callers (e.g. scripts,
+notebooks) that want a planner from a raw config dict without going through
+`PlannerConfig` — same rationale as the single-implementation ABCs called out
+at the top of this doc. Not a finding.
 
-### 6. `self.uuid = self.name` dead writes
-**Where:** `base_lidar.py:19`, `base_laser.py:17`.
+### 6. `self.uuid = self.name` dead writes — DONE
+**Where:** `base_lidar.py`, `base_laser.py`.
 Written, never read (non-native sensors never feed a habitat SensorSpec
-uuid). Delete.
+uuid — confirmed no call site reads `LiDAR3D`/`Laser2D` `.uuid`). Deleted
+from both `__init__`s.
 
 ## P4 — Payload contract & responsibility
 

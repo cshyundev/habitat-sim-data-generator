@@ -20,7 +20,6 @@ class LiDAR3D(BaseSensor, abc.ABC):
         to :class:`BaseSensor`; this class only adds LiDAR-specific state.
         """
         super().__init__(**kwargs)
-        self.uuid = self.name
 
         self.min_distance, self.max_distance = self._parse_distance_range(self.parameters)
 

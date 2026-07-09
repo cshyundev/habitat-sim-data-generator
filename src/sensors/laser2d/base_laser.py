@@ -17,7 +17,6 @@ class Laser2D(BaseSensor, abc.ABC):
     def __init__(self, **kwargs) -> None:
         """Initialize common 2D laser configuration."""
         super().__init__(**kwargs)
-        self.uuid = self.name
 
         self.min_distance, self.max_distance = self._parse_distance_range(self.parameters)
         self.ray_directions: Optional[np.ndarray] = None
