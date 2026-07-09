@@ -41,9 +41,9 @@ def create_simulator(
 
     sim = habitat_sim.Simulator(cfg)
 
-    # Bind the shared Scene to the fresh sim once, here: this extracts the
-    # geometry (BVH) and the semantic category table so both are ready before the
-    # first capture (the sidecar and the camera read them). Idempotent -- capture
-    # re-binds harmlessly.
+    # Eager bind: extract geometry (BVH) and the semantic category table right
+    # after sim construction, so both are ready for anything that reads them
+    # before the first capture (e.g. the map sidecar). SensorSuite.observe's
+    # bind() call is a re-bind safety net, not a second owner -- see its comment.
     sensor_suite.scene.bind(sim)
     return sim

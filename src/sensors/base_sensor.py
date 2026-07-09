@@ -247,6 +247,16 @@ class BaseSensor(abc.ABC):
         max_distance = float(parameters.get("max_distance", default_max))
         return min_distance, max_distance
 
+    def calibration_dict(self) -> Optional[Dict[str, object]]:
+        """Build a sidecar-friendly calibration record for this sensor.
+
+        Base returns ``None`` (no calibration sidecar). Sensors that have
+        projection/intrinsic data worth exporting (e.g. ``CameraSensor``)
+        should override this instead of relying on an implicit hasattr
+        protocol, so the capability is discoverable on the base class.
+        """
+        return None
+
     def world_pose(self, motion_state: MotionState) -> tuple[np.ndarray, np.ndarray]:
         """Compute this sensor's world pose at ``motion_state``.
 

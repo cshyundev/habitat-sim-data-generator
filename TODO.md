@@ -311,25 +311,33 @@ pre-existing `coords.py` <-> `src.datatypes.map` import cycle. Full suite green
 `test_mcap_export.py`/`test_visualization.py` updated to the `SceneMarker`
 contract).
 
-### 11. Config/doc leftovers (Round 2 item 13, minus the base_link key → item 9)
-- `config/config_stream.yaml:2` header references `generate_data.py` /
-  `config.yaml`, which don't exist; `CLAUDE.md:8` uses `generate_data.py`
-  as its example command.
-- `config/config_stream.yaml:42` raycasting comment says `sim | gpu` but the
-  code accepts `mlx` too (`runtime_config.py:246`).
+### 11. Config/doc leftovers (Round 2 item 13, minus the base_link key → item 9) — DONE
+`config/config_stream.yaml:2` header referenced `generate_data.py` /
+`config.yaml`, which don't exist (confirmed: only `stream_data.py` exists in
+the repo root) — trimmed to just the accurate `stream_data.py` reference.
+`CLAUDE.md:8`'s example command used `generate_data.py` — updated to
+`stream_data.py`. `config/config_stream.yaml:42` raycasting backend comment
+said `sim | gpu` but `runtime_config.py:245-247` accepts `mlx` too — comment
+now reads `sim | gpu | mlx`.
 
 ## P6 — Minor
 
-### 12. Small cleanups
-- `stream_data.py:22` imports `RerunBackend` (and thus `rerun`) eagerly; the
-  data-only run still requires rerun installed. Move the import inside
-  `if args.visualize:` — one line, makes rerun truly optional.
-- `calibration_dict` is an implicit hasattr-protocol
-  (`mcap_sink.py:64`). Make it explicit: `BaseSensor.calibration_dict() ->
-  Optional[dict]` returning `None` by default, so new sensor authors can
-  discover it.
-- Scene bind has two self-declared owners: `create_simulator` binds eagerly
-  (factory comment) and `SensorSuite.observe` re-binds per capture calling
-  itself the sole binder (`suite.py:171`). Idempotent and harmless, but pick
-  one story: factory bind = eager init for sidecars; observe bind = safety
-  guarantee. Fix the comments to say so.
+### 12. Small cleanups — DONE
+- `stream_data.py`'s top-level `RerunBackend`/`VisualizationSink` imports
+  (and thus the `rerun` dependency) are now inside the `if args.visualize:`
+  block, so a data-only (`--no-mcap`-less, non-`--visualize`) run no longer
+  requires `rerun` installed.
+- `calibration_dict` is no longer an implicit hasattr-protocol.
+  `BaseSensor.calibration_dict() -> Optional[Dict[str, object]]`
+  (`base_sensor.py`) returns `None` by default; `CameraSensor` overrides it
+  as before. `mcap_sink.collect_calibrations` calls it unconditionally and
+  checks for `None` instead of `hasattr`. Updated the `_FakeImu` test double
+  in `test_mcap_export.py` to implement the (now-required) method, matching
+  the explicit contract.
+- Scene bind: settled on one story via comments. `create_simulator`
+  (`factory.py`) is the eager-init owner (binds right after sim construction
+  so geometry/semantics are ready for anything reading them before first
+  capture). `SensorSuite.observe`'s `bind()` call (`suite.py`) is now
+  documented as a re-bind safety net for a Scene/sim used outside that
+  factory (e.g. tests), not a second owner — `sync()` is the real per-capture
+  work there. Full suite green (158 tests).

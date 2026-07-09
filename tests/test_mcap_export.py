@@ -188,6 +188,9 @@ class _FakeImu:
     name = "imu"
     parent_link = "imu_link"
 
+    def calibration_dict(self):
+        return None
+
 
 class _FakeLidar:
     sensor_type = "lidar3d"

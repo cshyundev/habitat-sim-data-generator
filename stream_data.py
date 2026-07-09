@@ -19,8 +19,6 @@ from src.sensors.suite import SensorSuite
 from src.simulator.factory import create_simulator
 from src.pipeline.streaming import build_pipeline
 from src.pipeline.mcap_sink import McapSink
-from src.visualization.rerun_backend import RerunBackend
-from src.visualization.visualization_sink import VisualizationSink
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +75,9 @@ def main() -> None:
             logger.info("   - MCAP Output Path: %s", mcap_path)
 
         if args.visualize:
+            from src.visualization.rerun_backend import RerunBackend
+            from src.visualization.visualization_sink import VisualizationSink
+
             sinks.append(VisualizationSink(RerunBackend()))
             logger.info("   - Live Rerun Visualization activated")
 

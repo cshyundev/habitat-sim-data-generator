@@ -55,14 +55,14 @@ def collect_calibrations(
             ``"<sensor>.<output>"``.
 
     Returns:
-        YAML-safe calibration records. Sensors without ``calibration_dict`` are
-        skipped.
+        YAML-safe calibration records. Sensors whose ``calibration_dict()``
+        returns ``None`` are skipped.
     """
     sensor_channels = sensor_channels or {}
     calibrations = []
     for sensor in sensors:
-        if hasattr(sensor, "calibration_dict"):
-            record = sensor.calibration_dict()
+        record = sensor.calibration_dict()
+        if record is not None:
             sensor_prefix = f"{sensor.name}."
             record["outputs"] = {
                 key[len(sensor_prefix):]: value

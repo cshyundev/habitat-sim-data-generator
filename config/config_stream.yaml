@@ -1,5 +1,5 @@
 # Habitat Simulator Scene Configuration (streaming / online-capture pipeline)
-# Used by stream_data.py. generate_data.py keeps using config.yaml unchanged.
+# Used by stream_data.py.
 scene_dataset_config_file: "habitat-sim/data/replica_cad/replicaCAD.scene_dataset_config.json"
 scene_id: "apt_0"
 
@@ -39,7 +39,7 @@ robot:
   #   backend: gpu  -> Apple Metal two-level BVH (MLX); default production path
   #   backend: sim  -> habitat-sim sim.cast_ray loop (CPU reference/parity only)
   raycasting:
-    backend: gpu          # sim | gpu
+    backend: gpu          # sim | gpu | mlx
     geometry: visual   # (gpu) collision = parity with cast_ray | visual = render mesh
     dynamic: false        # (gpu) refresh moved-object transforms each frame
     leaf_size: 8          # (gpu) BVH leaf size

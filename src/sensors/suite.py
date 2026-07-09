@@ -167,8 +167,10 @@ class SensorSuite:
             keyed by declared output name; payloads are validated against
             ``OUTPUT_PAYLOAD_CHECKS`` by ``capture_outputs``.
         """
-        # Prepare the shared Scene: bind once (idempotent), then refresh any moved
-        # geometry. Done here (once per capture) rather than per sensor.
+        # Safety-net re-bind: the factory already bound the Scene eagerly after
+        # sim construction (see its comment) -- this call is idempotent and only
+        # matters for a Scene/sim used without going through that factory (e.g.
+        # tests). sync() is the real per-capture work: refresh any moved geometry.
         self.scene.bind(sim)
         self.scene.sync(sim)
 
