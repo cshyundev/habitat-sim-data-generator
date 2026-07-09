@@ -179,6 +179,90 @@ class TestSensorSuiteInit(unittest.TestCase):
             _suite(config)
 
 
+class TestCaptureOutputsValidation(unittest.TestCase):
+    """SensorSuite.capture_outputs is the single payload-type check for the
+    pipeline (item 7): downstream sinks no longer isinstance-check payloads
+    themselves. Camera outputs use validator functions (not a bare
+    isinstance/type) because rgb/depth/semantic/instance all erase to
+    ``np.ndarray`` at runtime -- only shape/dtype tells them apart."""
+
+    def _camera_suite(self, outputs):
+        config = _cfg(
+            [_mount("camera_link", [0, 0, 0.5])],
+            [
+                {"link": "camera_link", "type": "camera", "hz": 5,
+                 "parameters": {
+                     "width": 640, "height": 480,
+                     "intrinsic": [500.0, 500.0, 320.0, 240.0],
+                 },
+                 "outputs": outputs},
+            ],
+        )
+        return _suite(config)
+
+    def test_point_cloud_payload_type_mismatch_raises(self):
+        suite = _suite(_multi_rate_config())
+        lidar = next(s for s in suite.sensors if s.name == "lidar_link")
+        with self.assertRaisesRegex(RuntimeError, "lidar_link.point_cloud.: expected PointCloud"):
+            suite.capture_outputs(lidar, {"point_cloud": object()})
+
+    def test_imu_payload_type_mismatch_raises(self):
+        suite = _suite(_multi_rate_config())
+        imu = next(s for s in suite.sensors if s.name == "imu_link")
+        with self.assertRaisesRegex(RuntimeError, "imu_link.imu.: expected Imu"):
+            suite.capture_outputs(imu, {"imu": object()})
+
+    def test_rgb_payload_type_mismatch_raises(self):
+        suite = self._camera_suite({"rgb": {}})
+        camera = suite.sensors[0]
+        with self.assertRaisesRegex(RuntimeError, "camera_link.rgb.: expected RGBImage"):
+            suite.capture_outputs(camera, {"rgb": object()})
+
+    def test_rgb_wrong_dtype_raises(self):
+        # Same runtime type (np.ndarray) as depth/semantic/instance -- only
+        # the validator's shape/dtype check catches this, isinstance alone
+        # could not.
+        suite = self._camera_suite({"rgb": {}})
+        camera = suite.sensors[0]
+        wrong_dtype = np.zeros((480, 640, 3), dtype=np.float32)
+        with self.assertRaisesRegex(RuntimeError, "camera_link.rgb.: expected RGBImage"):
+            suite.capture_outputs(camera, {"rgb": wrong_dtype})
+
+    def test_rgb_correct_shape_dtype_passes(self):
+        suite = self._camera_suite({"rgb": {}})
+        camera = suite.sensors[0]
+        image = np.zeros((480, 640, 3), dtype=np.uint8)
+        outputs = suite.capture_outputs(camera, {"rgb": image})
+        self.assertIs(outputs["rgb"], image)
+
+    def test_depth_wrong_dtype_raises(self):
+        suite = self._camera_suite({"rgb": {}, "depth": {}})
+        camera = suite.sensors[0]
+        wrong_dtype = np.zeros((480, 640), dtype=np.uint8)
+        with self.assertRaisesRegex(RuntimeError, "camera_link.depth.: expected DepthMap"):
+            suite.capture_outputs(camera, {"depth": wrong_dtype})
+
+    def test_bbox2d_payload_type_mismatch_raises(self):
+        suite = self._camera_suite({"rgb": {}, "bbox2d": {}})
+        camera = suite.sensors[0]
+        with self.assertRaisesRegex(RuntimeError, "camera_link.bbox2d.: expected List\\[Detection2D\\]"):
+            suite.capture_outputs(camera, {"bbox2d": object()})
+
+    def test_bbox3d_payload_type_mismatch_raises(self):
+        suite = self._camera_suite({"rgb": {}, "bbox3d": {}})
+        camera = suite.sensors[0]
+        with self.assertRaisesRegex(RuntimeError, "camera_link.bbox3d.: expected Dict\\[str, List\\[OBB3D\\]\\]"):
+            suite.capture_outputs(camera, {"bbox3d": object()})
+
+    def test_correctly_typed_payload_passes_through(self):
+        suite = _suite(_multi_rate_config())
+        lidar = next(s for s in suite.sensors if s.name == "lidar_link")
+        from src.datatypes.point_cloud import PointCloud
+        cloud = PointCloud(points=np.zeros((0, 3), dtype=np.float32))
+        outputs = suite.capture_outputs(lidar, {"point_cloud": cloud})
+        self.assertIs(outputs["point_cloud"], cloud)
+
+
 class TestEventScheduler(unittest.TestCase):
     def test_event_scheduler_multi_rate(self):
         suite = _suite(_multi_rate_config())

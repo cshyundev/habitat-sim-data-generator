@@ -144,17 +144,40 @@ from both `__init__`s.
 
 ## P4 — Payload contract & responsibility
 
-### 7. output-name → payload-type mapping exists only as strings + docstrings
-The mapping lives in **three docstrings** (`BaseSensor.get_observation`,
+### 7. output-name → payload-type mapping exists only as strings + docstrings — DONE
+The mapping lived in **three docstrings** (`BaseSensor.get_observation`,
 `StreamEvent`, `export_sensor_data`) and **two independent code copies**
 (`export_helper._OUTPUT_WRITERS` + its `_expect_payload` checks;
 `visualization_sink.log_outputs` string dispatch + its own isinstance
-checks). Symptom: export_helper type-checks point_cloud/laser_scan/imu but
-not images/detections — Round 2 item 16 applied to only half the writers.
-**Fix:** declare the payload type with the output (one table, e.g.
-`output name -> datatype class`, owned by the sensor layer) and type-check
-**once** in `SensorSuite.capture_outputs`; both sinks drop their isinstance
-guards. Do this before the sensor lineup grows.
+checks), and export_helper only type-checked point_cloud/laser_scan/imu, not
+images/detections.
+
+Added `OUTPUT_PAYLOAD_CHECKS` (`base_sensor.py`) as the single output name ->
+`(validator, description)` table. Not a bare `output name -> type` dict: a
+plain type can't express the contract for the camera outputs.
+`PointCloud`/`LaserScan`/`Imu` are real classes and get a plain `isinstance`
+validator, but rgb/depth/semantic/instance all erase to `np.ndarray` at
+runtime (the `RGBImage`/`DepthMap`/`SemanticMap`/`InstanceMap` aliases are
+`NewType` wrappers with no runtime class of their own, so `isinstance(x,
+RGBImage)` raises `TypeError`, not a clean pass/fail) — so each gets its own
+validator function checking shape/dtype instead (rgb: `(H,W,3|4)` uint8;
+depth: `(H,W)` float32; semantic/instance: `(H,W)` uint32, not
+distinguishable from each other beyond that). bbox2d/bbox3d check
+`list`/`dict` (`List[Detection2D]`/`Dict[str, List[OBB3D]]` are subscripted
+generics, also illegal `isinstance` targets).
+
+`SensorSuite.capture_outputs` now validates every payload against this table
+once (extending the check to images/detections, closing the original gap);
+both sinks dropped their isinstance guards (`export_helper._expect_payload`
+deleted; `visualization_sink`'s `_log_lidar3d`/`_log_imu` checks deleted) and
+trust the payload by the time it reaches them. The three docstrings now
+point at the table instead of restating it. Payload-mismatch tests moved
+from `test_mcap_export.py`/`test_visualization.py` (which tested the
+now-removed sink-level checks) to `TestCaptureOutputsValidation` in
+`test_sensor_suite.py`, extended to cover rgb/bbox2d/bbox3d plus
+wrong-dtype-same-runtime-type cases (e.g. a float32 `(H,W,3)` array is
+rejected as `rgb`, proving the shape/dtype check catches what a bare
+`isinstance(x, np.ndarray)` could not). Full suite green (151 tests).
 
 ### 8. Habitat→ROS conversion reimplemented per sink
 `McapSink`/`export_helper` and `VisualizationSink` each convert payloads

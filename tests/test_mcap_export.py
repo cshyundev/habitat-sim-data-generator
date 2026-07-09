@@ -198,12 +198,6 @@ class _FakeLidar:
     parent_link = "lidar_link"
 
 
-class _FakeLaser:
-    sensor_type = "laser2d"
-    name = "laser"
-    parent_link = "laser_link"
-
-
 class _FakeTFManager:
     links = {}
 
@@ -241,17 +235,10 @@ class TestExportSensorDataValidation(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "lidar: expected sensor outputs mapping"):
             export_sensor_data(object(), _FakeLidar(), object(), 0)
 
-    def test_point_cloud_payload_type_mismatch_raises(self):
-        with self.assertRaisesRegex(TypeError, "lidar.point_cloud: expected PointCloud"):
-            export_sensor_data(object(), _FakeLidar(), {"point_cloud": object()}, 0)
-
-    def test_laser_scan_payload_type_mismatch_raises(self):
-        with self.assertRaisesRegex(TypeError, "laser.laser_scan: expected LaserScan"):
-            export_sensor_data(object(), _FakeLaser(), {"laser_scan": object()}, 0)
-
-    def test_imu_payload_type_mismatch_raises(self):
-        with self.assertRaisesRegex(TypeError, "imu.imu: expected Imu"):
-            export_sensor_data(object(), _FakeImu(), {"imu": object()}, 0)
+    # Payload type mismatches (point_cloud/laser_scan/imu/etc.) are now caught
+    # once, upstream, by SensorSuite.capture_outputs -- see
+    # TestCaptureOutputsValidation in test_sensor_suite.py. export_sensor_data
+    # trusts the payload type by the time it gets here.
 
     def test_empty_point_cloud_is_still_skipped(self):
         export_sensor_data(

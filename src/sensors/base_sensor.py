@@ -1,14 +1,94 @@
 import abc
-from typing import Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 import habitat_sim
 import numpy as np
 
+from src.datatypes.imu import Imu
+from src.datatypes.laser_scan import LaserScan
 from src.datatypes.motion_state import MotionState
+from src.datatypes.point_cloud import PointCloud
 from src.utils.geometry import compose_pose
 from src.utils.tf import TFManager
 
 if TYPE_CHECKING:
     from src.scene import Scene
+
+
+def _is_point_cloud(payload: object) -> bool:
+    return isinstance(payload, PointCloud)
+
+
+def _is_laser_scan(payload: object) -> bool:
+    return isinstance(payload, LaserScan)
+
+
+def _is_imu(payload: object) -> bool:
+    return isinstance(payload, Imu)
+
+
+def _is_rgb_image(payload: object) -> bool:
+    return (
+        isinstance(payload, np.ndarray)
+        and payload.ndim == 3
+        and payload.shape[2] in (3, 4)
+        and payload.dtype == np.uint8
+    )
+
+
+def _is_depth_map(payload: object) -> bool:
+    return (
+        isinstance(payload, np.ndarray)
+        and payload.ndim == 2
+        and payload.dtype == np.float32
+    )
+
+
+def _is_label_map(payload: object) -> bool:
+    # Shared by semantic/instance: both are (H, W) uint32 id maps and are not
+    # distinguishable from each other by shape/dtype alone.
+    return (
+        isinstance(payload, np.ndarray)
+        and payload.ndim == 2
+        and payload.dtype == np.uint32
+    )
+
+
+def _is_detections2d(payload: object) -> bool:
+    return isinstance(payload, list)
+
+
+def _is_detections3d(payload: object) -> bool:
+    return isinstance(payload, dict)
+
+
+_PayloadValidator = Callable[[object], bool]
+
+# Single source for output name -> (validator, description). Checked once by
+# ``SensorSuite.capture_outputs`` right after a sensor returns its outputs, so
+# every sink downstream (MCAP, visualization) can trust the payload shape
+# instead of re-deriving/re-checking it.
+#
+# A validator function, not a bare type: ``isinstance`` can't express this
+# contract on its own. ``PointCloud``/``LaserScan``/``Imu`` are real classes,
+# but the camera outputs (rgb/depth/semantic/instance) all erase to
+# ``np.ndarray`` at runtime -- the ``RGBImage``/``DepthMap``/``SemanticMap``/
+# ``InstanceMap`` aliases in ``src.datatypes.image`` are ``NewType`` wrappers
+# with no runtime class of their own, so distinguishing them requires
+# checking shape/dtype instead. Likewise ``List[Detection2D]``/
+# ``Dict[str, List[OBB3D]]`` are subscripted generics, not valid
+# ``isinstance`` targets, so bbox2d/bbox3d check the container type only.
+OUTPUT_PAYLOAD_CHECKS: Dict[str, Tuple[_PayloadValidator, str]] = {
+    "point_cloud": (_is_point_cloud, "PointCloud"),
+    "laser_scan": (_is_laser_scan, "LaserScan"),
+    "imu": (_is_imu, "Imu"),
+    "rgb": (_is_rgb_image, "RGBImage ((H, W, 3|4) uint8 ndarray)"),
+    "depth": (_is_depth_map, "DepthMap ((H, W) float32 ndarray)"),
+    "semantic": (_is_label_map, "SemanticMap ((H, W) uint32 ndarray)"),
+    "instance": (_is_label_map, "InstanceMap ((H, W) uint32 ndarray)"),
+    "bbox2d": (_is_detections2d, "List[Detection2D]"),
+    "bbox3d": (_is_detections3d, "Dict[str, List[OBB3D]]"),
+}
+
 
 class BaseSensor(abc.ABC):
     """
@@ -167,12 +247,8 @@ class BaseSensor(abc.ABC):
                 IMU-like sensors use the velocity/acceleration fields.
 
         Returns:
-            Mapping of configured output name to payload. Current payloads are
-            combinations of the existing datatypes:
-            ``PointCloud`` for ``point_cloud``, ``LaserScan`` for
-            ``laser_scan``, ``Imu`` for ``imu``, image aliases such as
-            ``RGBImage``/``DepthMap``/``SemanticMap``/``InstanceMap`` for camera
-            images, ``List[Detection2D]`` for ``bbox2d``, and
-            ``Dict[str, List[OBB3D]]`` for ``bbox3d``.
+            Mapping of configured output name to payload. See
+            :data:`OUTPUT_PAYLOAD_CHECKS` for the output name -> payload type
+            contract; ``SensorSuite.capture_outputs`` validates against it.
         """
         pass

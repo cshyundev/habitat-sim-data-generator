@@ -14,8 +14,6 @@ import numpy as np
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
-from src.datatypes.imu import Imu
-from src.datatypes.point_cloud import PointCloud
 from src.visualization.backend import VisualizationBackend
 from src.utils.coords import (
     habitat_to_ros_pose,
@@ -228,11 +226,7 @@ class VisualizationSink(StreamSink):
     # Per-sensor-type handlers
     # ------------------------------------------------------------------
     def _log_lidar3d(self, sensor, cloud) -> None:
-        if not isinstance(cloud, PointCloud):
-            raise TypeError(
-                f"{sensor.name}.point_cloud: expected PointCloud, "
-                f"got {type(cloud).__name__}."
-            )
+        # Payload type already validated once by SensorSuite.capture_outputs.
         if cloud.size == 0:
             return
         ros_pc = habitat_to_ros_pointcloud(cloud.points).astype(np.float32)
@@ -244,11 +238,7 @@ class VisualizationSink(StreamSink):
         )
 
     def _log_imu(self, sensor, observation) -> None:
-        if not isinstance(observation, Imu):
-            raise TypeError(
-                f"{sensor.name}.imu: expected Imu, "
-                f"got {type(observation).__name__}."
-            )
+        # Payload type already validated once by SensorSuite.capture_outputs.
         av = habitat_to_ros_position(np.asarray(observation.angular_velocity, dtype=np.float64))
         la = habitat_to_ros_position(np.asarray(observation.linear_acceleration, dtype=np.float64))
         base = f"{self.imu_path}/{sensor.name}"

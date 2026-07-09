@@ -3,7 +3,7 @@ import habitat_sim
 
 from src.utils.tf import TFManager
 from src.datatypes.motion_state import MotionState
-from src.sensors.base_sensor import BaseSensor
+from src.sensors.base_sensor import OUTPUT_PAYLOAD_CHECKS, BaseSensor
 from src.sensors.registry import get_sensor_class
 from src.robot_config import RobotBundle, SensorSpec
 from src.runtime_config import RaycastingConfig
@@ -162,8 +162,8 @@ class SensorSuite:
 
         Returns:
             Mapping of sensor name to its output mapping. Each inner mapping is
-            keyed by declared output name and carries one of the existing
-            payload classes or image aliases documented by ``BaseSensor``.
+            keyed by declared output name; payloads are validated against
+            ``OUTPUT_PAYLOAD_CHECKS`` by ``capture_outputs``.
         """
         # Prepare the shared Scene: bind once (idempotent), then refresh any moved
         # geometry. Done here (once per capture) rather than per sensor.
@@ -181,6 +181,11 @@ class SensorSuite:
     ) -> Dict[str, object]:
         """Normalize and validate one sensor's returned output mapping.
 
+        The single payload-type check for the whole pipeline: every output
+        name with an entry in ``OUTPUT_PAYLOAD_CHECKS`` must pass that
+        output's validator. Downstream sinks (MCAP, visualization) trust this
+        and no longer re-check.
+
         Args:
             sensor: Sensor that produced ``raw_outputs``.
             raw_outputs: Mapping returned by ``sensor.get_observation``.
@@ -189,8 +194,9 @@ class SensorSuite:
             Output mapping with lowercased output names.
 
         Raises:
-            RuntimeError: If the sensor returns a non-mapping payload or an
-                output name that was not declared in its config.
+            RuntimeError: If the sensor returns a non-mapping payload, an
+                output name that was not declared in its config, or a payload
+                that fails its ``OUTPUT_PAYLOAD_CHECKS`` validator.
         """
         spec = self._spec_by_name[sensor.name]
         if not isinstance(raw_outputs, dict):
@@ -206,5 +212,13 @@ class SensorSuite:
                 raise RuntimeError(
                     f"Sensor '{sensor.name}' returned undeclared output '{output_key}'."
                 )
+            check = OUTPUT_PAYLOAD_CHECKS.get(output_key)
+            if check is not None:
+                validate, description = check
+                if not validate(payload):
+                    raise RuntimeError(
+                        f"Sensor '{sensor.name}.{output_key}': expected "
+                        f"{description} payload, got {type(payload).__name__}."
+                    )
             outputs[output_key] = payload
         return outputs

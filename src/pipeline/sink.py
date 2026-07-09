@@ -44,8 +44,9 @@ class StreamEvent:
         timestamp_ns: Event timestamp in nanoseconds.
         motion_state: Robot state at ``timestamp_ns``.
         observations: Mapping of sensor name to output payloads. Inner mappings
-            are keyed by declared output name and contain the existing sensor
-            datatypes or camera image aliases.
+            are keyed by declared output name; payload types are validated
+            against ``BaseSensor.OUTPUT_PAYLOAD_CHECKS`` by
+            ``SensorSuite.capture_outputs`` before an event is emitted.
         firing_sensors: Sensors scheduled at ``timestamp_ns``.
     """
     timestamp_ns: int
