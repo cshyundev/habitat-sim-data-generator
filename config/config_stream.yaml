@@ -29,8 +29,8 @@ planner:
 
 # Robot Definition
 robot:
-  base_link: "base_link"
-  # Robot structure is always loaded from a URDF file.
+  # Robot structure is always loaded from a URDF file (root link is derived
+  # from it, not configured here).
   urdf: assets/robots/cylinder_robot.urdf
   # Sensor generation parameters only. Frame attachment and export channels live here.
   sensors: assets/robots/sensors.yaml

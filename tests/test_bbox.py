@@ -116,6 +116,7 @@ class _RecBackend:
 class TestVizSink(unittest.TestCase):
     def test_sink_logs_2d_and_3d_detections(self):
         from src.datatypes.motion_state import MotionState
+        from src.utils.coords import habitat_to_ros_obb
         from src.visualization.visualization_sink import VisualizationSink
 
         be = _RecBackend()
@@ -134,10 +135,13 @@ class TestVizSink(unittest.TestCase):
             "sensor_type": "camera",
             "parent_link": "camera_link",
         })()
+        # bbox3d is Habitat->ROS-converted once by SensorSuite.capture_outputs
+        # before any sink sees it -- convert here to hand the sink what it'd
+        # actually receive from the real pipeline.
         obs = {
             "rgb": np.zeros((4, 4, 3), np.uint8),
             "bbox2d": [d2],
-            "bbox3d": {"world": [o3], "camera": []},
+            "bbox3d": {"world": [habitat_to_ros_obb(o3)], "camera": []},
         }
 
         sink.log_outputs(cam, obs)

@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 from src.datatypes.pose import Pose3D
 from src.sensors.suite import SensorSuite
 from src.utils.habitat import pose_to_agent_state
-from src.utils.coords import extract_visual_map_as_markers
+from src.utils.coords import extract_visual_map_as_markers, habitat_to_ros_pose
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
 from src.planners.global_planning import BaseGlobalPlanner
 from src.planners.local_planning import BaseLocalPlanner
@@ -110,6 +110,7 @@ class StreamingPipeline:
                     scene_markers=self.scene_markers,
                     tf_manager=self.sensor_suite.tf_manager,
                     sensors=self.sensor_suite.sensors,
+                    root_link=self.sensor_suite.root_link,
                     sensor_outputs=self.sensor_suite.sensor_outputs(),
                     artifacts=self.artifacts,
                     category_names=self.category_names,
@@ -127,11 +128,14 @@ class StreamingPipeline:
                 motion_state = self.local_planner.update(t)
                 self.sim.get_agent(0).set_state(pose_to_agent_state(motion_state.pose))
                 observations = self.sensor_suite.observe(firing, self.sim, motion_state)
+                # Converted once here, not by each sink -- see StreamEvent.ros_pose.
+                ros_pose = habitat_to_ros_pose(motion_state.pose)
 
                 for sink in sinks:
                     sink.on_event(StreamEvent(
                         timestamp_ns=t,
                         motion_state=motion_state,
+                        ros_pose=ros_pose,
                         observations=observations,
                         firing_sensors=firing,
                     ))

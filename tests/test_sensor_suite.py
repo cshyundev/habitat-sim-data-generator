@@ -254,13 +254,46 @@ class TestCaptureOutputsValidation(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "camera_link.bbox3d.: expected Dict\\[str, List\\[OBB3D\\]\\]"):
             suite.capture_outputs(camera, {"bbox3d": object()})
 
-    def test_correctly_typed_payload_passes_through(self):
+    def test_point_cloud_is_habitat_to_ros_converted(self):
+        """point_cloud has an OUTPUT_ROS_CONVERTERS entry -- capture_outputs
+        converts it once here, so it returns a new (converted) instance, not
+        the same object back."""
+        from src.datatypes.point_cloud import PointCloud
+        from src.utils.coords import habitat_to_ros_pointcloud
+
         suite = _suite(_multi_rate_config())
         lidar = next(s for s in suite.sensors if s.name == "lidar_link")
-        from src.datatypes.point_cloud import PointCloud
-        cloud = PointCloud(points=np.zeros((0, 3), dtype=np.float32))
+        points = np.array([[1.0, 2.0, 3.0]], dtype=np.float32)
+        cloud = PointCloud(points=points)
         outputs = suite.capture_outputs(lidar, {"point_cloud": cloud})
-        self.assertIs(outputs["point_cloud"], cloud)
+        np.testing.assert_allclose(
+            outputs["point_cloud"].points, habitat_to_ros_pointcloud(points), atol=1e-6
+        )
+
+    def test_output_with_no_converter_passes_through_unchanged(self):
+        """laser_scan has no OUTPUT_ROS_CONVERTERS entry (frame-invariant),
+        so capture_outputs returns the exact same object."""
+        config = self._laser_config()
+        suite = _suite(config)
+        laser = suite.sensors[0]
+        from src.datatypes.laser_scan import LaserScan
+        scan = LaserScan(
+            ranges=np.zeros(4, dtype=np.float32),
+            angle_min=0.0, angle_max=1.0, angle_increment=0.1,
+            range_min=0.1, range_max=10.0,
+        )
+        outputs = suite.capture_outputs(laser, {"laser_scan": scan})
+        self.assertIs(outputs["laser_scan"], scan)
+
+    def _laser_config(self):
+        return _cfg(
+            [_mount("laser_link", [0, 0, 0.2])],
+            [
+                {"link": "laser_link", "type": "laser2d", "hz": 10,
+                 "outputs": {"laser_scan": {}},
+                 "parameters": {"min_distance": 0.1, "max_distance": 10.0}},
+            ],
+        )
 
 
 class TestEventScheduler(unittest.TestCase):

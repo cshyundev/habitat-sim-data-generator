@@ -7,6 +7,11 @@ from src.datatypes.imu import Imu
 from src.datatypes.laser_scan import LaserScan
 from src.datatypes.motion_state import MotionState
 from src.datatypes.point_cloud import PointCloud
+from src.utils.coords import (
+    habitat_to_ros_obb,
+    habitat_to_ros_pointcloud,
+    habitat_to_ros_position,
+)
 from src.utils.geometry import compose_pose
 from src.utils.tf import TFManager
 
@@ -90,6 +95,48 @@ OUTPUT_PAYLOAD_CHECKS: Dict[str, Tuple[_PayloadValidator, str]] = {
 }
 
 
+def _point_cloud_to_ros(cloud: PointCloud) -> PointCloud:
+    return PointCloud(
+        points=habitat_to_ros_pointcloud(cloud.points).astype(np.float32),
+        timestamp_ns=cloud.timestamp_ns,
+    )
+
+
+def _imu_to_ros(observation: Imu) -> Imu:
+    return Imu(
+        angular_velocity=habitat_to_ros_position(
+            np.asarray(observation.angular_velocity, dtype=np.float64)
+        ),
+        linear_acceleration=habitat_to_ros_position(
+            np.asarray(observation.linear_acceleration, dtype=np.float64)
+        ),
+    )
+
+
+def _bbox3d_to_ros(boxes: Dict[str, list]) -> Dict[str, list]:
+    # Only "world" is ever read downstream (MCAP/visualization both key off
+    # it); "camera" stays in Habitat frame -- nothing consumes it converted.
+    return {**boxes, "world": [habitat_to_ros_obb(o) for o in boxes.get("world", [])]}
+
+
+_PayloadConverter = Callable[[object], object]
+
+# Single source for output name -> Habitat-to-ROS converter, applied once by
+# ``SensorSuite.capture_outputs`` right after validation, so every sink reads
+# already-ROS-frame data -- neither derives nor re-derives the conversion
+# itself, closing the risk that a future output type or sink forgets it.
+# Only outputs carrying a 3D position/orientation need this: images
+# (rgb/depth/semantic/instance) and pixel-space bbox2d have no coordinate
+# frame to convert, and laser_scan's angle_min/max are frame-invariant under
+# the fixed Habitat<->ROS basis rotation (a proper rotation, determinant +1,
+# with the "up" axis mapped directly Y_hab -> Z_ros) -- no entry needed.
+OUTPUT_ROS_CONVERTERS: Dict[str, _PayloadConverter] = {
+    "point_cloud": _point_cloud_to_ros,
+    "imu": _imu_to_ros,
+    "bbox3d": _bbox3d_to_ros,
+}
+
+
 class BaseSensor(abc.ABC):
     """
     Abstract base class for all sensors (native and custom).
@@ -105,6 +152,7 @@ class BaseSensor(abc.ABC):
         tf_manager: TFManager,
         scene: Optional["Scene"] = None,
         output_names: Optional[List[str]] = None,
+        root_link: str = "base_link",
     ):
         """
         Initialize the sensor.
@@ -123,6 +171,10 @@ class BaseSensor(abc.ABC):
             output_names: The sensor's declared output names, stored (lowercased)
                 as the ``self.outputs`` set. Outputs carry no per-output params;
                 sensor settings live in ``parameters``.
+            root_link: Name of the URDF root frame the mount pose is resolved
+                relative to. ``SensorSuite`` passes ``RobotBundle.root_link``
+                (derived from the URDF); the default matches every test
+                fixture's frame tree.
         """
         self.name = name
         self.sensor_type = sensor_type
@@ -132,12 +184,13 @@ class BaseSensor(abc.ABC):
         self.tf_manager = tf_manager
         self.scene = scene
         self.outputs: Set[str] = {str(out_name).lower() for out_name in (output_names or [])}
+        self.root_link = root_link
 
-        # Mount pose relative to base_link. No silent fallback: an
+        # Mount pose relative to the root link. No silent fallback: an
         # unresolvable parent_link is a config error, not a recoverable one --
         # masking it here would mount the sensor at identity and produce
         # plausible-looking but wrong ground truth.
-        self.pose = self.tf_manager.get_relative_pose("base_link", self.parent_link)
+        self.pose = self.tf_manager.get_relative_pose(self.root_link, self.parent_link)
 
     @classmethod
     def validate_outputs(cls, outputs: Dict[str, object]) -> None:

@@ -6,21 +6,18 @@ semantic logging calls. It only ever renders sensors that actually appear in the
 events, so a config without (say) a lidar simply produces no lidar logging --
 no hardcoded assumptions, no fallbacks, no errors.
 
-Coordinate handling (Habitat -> ROS) and point-cloud construction happen here so
-the backend receives final ROS-frame arrays only; this keeps the live view
-consistent with the MCAP/offline view.
+Sensor-output payloads (point_cloud/imu/bbox3d) arrive already Habitat->ROS
+converted (``SensorSuite.capture_outputs``) and ``ev.ros_pose`` is likewise
+converted once per event (``StreamingPipeline``) -- this sink only converts
+the one thing that's genuinely its own: the static per-sensor mount frames in
+``on_start``, which nothing else needs.
 """
 import numpy as np
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from src.pipeline.sink import StreamContext, StreamEvent, StreamSink
 from src.visualization.backend import VisualizationBackend
-from src.utils.coords import (
-    habitat_to_ros_pose,
-    habitat_to_ros_pointcloud,
-    habitat_to_ros_position,
-    habitat_to_ros_obb,
-)
+from src.utils.coords import habitat_to_ros_pose
 
 if TYPE_CHECKING:
     from src.sensors.base_sensor import BaseSensor
@@ -134,7 +131,7 @@ class VisualizationSink(StreamSink):
         # placed relative to the moving robot via the entity hierarchy.
         for sensor in ctx.sensors:
             rel = habitat_to_ros_pose(
-                ctx.tf_manager.get_relative_pose("base_link", sensor.parent_link)
+                ctx.tf_manager.get_relative_pose(ctx.root_link, sensor.parent_link)
             )
             self.backend.log_transform(
                 f"{self.robot_path}/{sensor.parent_link}",
@@ -151,7 +148,7 @@ class VisualizationSink(StreamSink):
         """
         self.backend.set_time(ev.timestamp_ns)
 
-        ros_pose = habitat_to_ros_pose(ev.motion_state.pose)
+        ros_pose = ev.ros_pose
         self.backend.log_transform(
             self.robot_path,
             translation=ros_pose.position,
@@ -197,19 +194,17 @@ class VisualizationSink(StreamSink):
             self._log_boxes2d(sensor, boxes2d, image)
 
     def _log_boxes3d(self, bbox3d) -> None:
-        # 3D OBBs into the world scene (Habitat world -> ROS). The box rotation is
-        # mapped by R_HAB_TO_ROS on the left (not conjugated) so the directional
-        # half-extents stay aligned with their axes.
+        # "world" boxes are already Habitat->ROS-converted once by
+        # SensorSuite.capture_outputs.
         if bbox3d is None:
             return
         centers, halfs, quats, colors, labels = [], [], [], [], []
-        for o in bbox3d.get("world", []):
-            o_ros = habitat_to_ros_obb(o)
+        for o_ros in bbox3d.get("world", []):
             centers.append(o_ros.center)
             halfs.append(o_ros.half_extents)
             quats.append(o_ros.quat_xyzw)
-            colors.append(_class_color(o.class_id))
-            labels.append(f"{o.instance_id}:{o.class_name}")
+            colors.append(_class_color(o_ros.class_id))
+            labels.append(f"{o_ros.instance_id}:{o_ros.class_name}")
         self.backend.log_boxes3d(self.detections_path, centers, halfs, quats, colors, labels)
 
     def _log_boxes2d(self, sensor, boxes2d, img) -> None:
@@ -226,21 +221,22 @@ class VisualizationSink(StreamSink):
     # Per-sensor-type handlers
     # ------------------------------------------------------------------
     def _log_lidar3d(self, sensor, cloud) -> None:
-        # Payload type already validated once by SensorSuite.capture_outputs.
+        # Payload already validated and Habitat->ROS-converted once by
+        # SensorSuite.capture_outputs.
         if cloud.size == 0:
             return
-        ros_pc = habitat_to_ros_pointcloud(cloud.points).astype(np.float32)
         self.backend.log_points(
             f"{self.robot_path}/{sensor.parent_link}/points",
-            ros_pc,
+            cloud.points,
             _LIDAR_COLOR,
             radius=0.025,
         )
 
     def _log_imu(self, sensor, observation) -> None:
-        # Payload type already validated once by SensorSuite.capture_outputs.
-        av = habitat_to_ros_position(np.asarray(observation.angular_velocity, dtype=np.float64))
-        la = habitat_to_ros_position(np.asarray(observation.linear_acceleration, dtype=np.float64))
+        # Payload already validated and Habitat->ROS-converted once by
+        # SensorSuite.capture_outputs.
+        av = observation.angular_velocity
+        la = observation.linear_acceleration
         base = f"{self.imu_path}/{sensor.name}"
         for i, axis in enumerate(("x", "y", "z")):
             self.backend.log_scalar(f"{base}/angular_velocity/{axis}", float(av[i]))

@@ -6,6 +6,7 @@ from src.datatypes.motion_state import MotionState
 from src.datatypes.point_cloud import PointCloud
 from src.datatypes.imu import Imu
 from src.pipeline.sink import StreamContext, StreamEvent
+from src.utils.coords import habitat_to_ros_pose
 from src.visualization.backend import VisualizationBackend
 from src.visualization.visualization_sink import VisualizationSink, _normalize_vertex_colors
 
@@ -84,9 +85,11 @@ def _motion_state():
 
 
 def _event(firing, observations):
+    motion_state = _motion_state()
     return StreamEvent(
         timestamp_ns=1000,
-        motion_state=_motion_state(),
+        motion_state=motion_state,
+        ros_pose=habitat_to_ros_pose(motion_state.pose),
         observations=observations,
         firing_sensors=firing,
     )

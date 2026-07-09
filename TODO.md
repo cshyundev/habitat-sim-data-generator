@@ -179,21 +179,83 @@ wrong-dtype-same-runtime-type cases (e.g. a float32 `(H,W,3)` array is
 rejected as `rgb`, proving the shape/dtype check catches what a bare
 `isinstance(x, np.ndarray)` could not). Full suite green (151 tests).
 
-### 8. Habitat→ROS conversion reimplemented per sink
-`McapSink`/`export_helper` and `VisualizationSink` each convert payloads
-(pointcloud, obb, imu vectors, pose) independently; a third sink means a
-third reimplementation. Convert once (either at event boundary or via
-per-datatype `to_ros()` helpers) and let sinks consume ROS-frame data.
-Related to item 7 — same table can carry the converter.
+### 8. Habitat→ROS conversion reimplemented per sink — DONE
+First attempt (per-datatype `to_ros()` methods on `PointCloud`/`Imu`/`OBB3D`/
+`Pose3D`) was reverted after review: it just renamed the same call at the
+same call sites, since the `habitat_to_ros_*` functions were already
+centralized in `coords.py` and already shared by every caller. That missed
+the actual problem.
 
-### 9. `"base_link"` hardcoded x6 + config key nobody reads
-**Where:** literals in `visualization_sink.py`, `mcap_sink.py`,
-`base_lidar.py`, `camera.py`, `base_laser.py`, `ideal_imu.py`;
-`config/config_stream.yaml:32` `robot.base_link:` key is read by nothing
-(carried from Round 2 item 13). `robot.py:96` already has `_root_link` —
-derive the root frame from the URDF, expose it as `RobotBundle.root_link`,
-thread it to the six sites, and delete the config key. Kills the hardcoding
-and the dead key in one move.
+The real problem: it's not that the *conversion functions* are duplicated
+(they aren't) — it's that the *decision of which output types need
+conversion* is decentralized across sinks. `McapSink`/`export_helper` and
+`VisualizationSink` are two independent consumers of the same per-event data
+(point_cloud, imu, bbox3d, robot pose), and each independently has to
+remember "this output needs `habitat_to_ros_pointcloud`, that one needs
+`habitat_to_ros_position` on two fields, this one needs `habitat_to_ros_obb`
+per box, laser_scan needs nothing." Today both sinks happen to agree, but
+nothing enforces that — a new output type or a third sink can silently apply
+the conversion to one sink and forget it on another, producing Habitat-frame
+data leaking through one path while the other is correct. That's the same
+shape of blind spot item 7 fixed for payload-type validation, just for
+conversion instead.
+
+Distinguished this from a second, superficially similar set of call sites
+that are *not* duplication: `mcap_sink.py`'s static-TF loop (every URDF link,
+for `/tf_static`) and `visualization_sink.py`'s per-sensor mount-frame loop
+(only sensor links, relative to root, for the live-view entity hierarchy)
+both call `habitat_to_ros_pose`, but over different frame sets for different
+purposes — coincidental shared-utility reuse, not reimplementation. Left
+those as direct calls.
+
+Fix, matching item 7's precedent (own the table): added
+`OUTPUT_ROS_CONVERTERS: Dict[str, Callable]` next to `OUTPUT_PAYLOAD_CHECKS`
+in `base_sensor.py` (point_cloud/imu/bbox3d only — images/bbox2d have no 3D
+frame, and laser_scan's angle_min/max are frame-invariant under the fixed
+Habitat<->ROS basis rotation, a proper rotation with the "up" axis mapped
+directly). `SensorSuite.capture_outputs` applies it once, right after
+validation, so every sink now reads already-ROS-frame sensor outputs.
+Added `StreamEvent.ros_pose`, computed once per event in
+`StreamingPipeline.run()` (`motion_state.pose` itself stays Habitat-frame --
+the simulator advances from it) instead of each sink converting
+`ev.motion_state.pose` itself. `export_helper.py`'s and
+`visualization_sink.py`'s point_cloud/imu/bbox3d writers/loggers no longer
+import or call any `habitat_to_ros_*` function at all — they just use the
+payload as received. Updated the tests that fed raw Habitat-frame payloads
+directly to sink methods (bypassing `capture_outputs`) to pre-convert first,
+matching what the real pipeline now hands them
+(`test_bbox.py::test_sink_logs_2d_and_3d_detections`), and replaced the
+identity-passthrough assertion in
+`test_sensor_suite.py::test_correctly_typed_payload_passes_through` (split
+into `test_point_cloud_is_habitat_to_ros_converted` +
+`test_output_with_no_converter_passes_through_unchanged`, since point_cloud
+is no longer a no-op passthrough). Full suite green (153 tests).
+
+### 9. `"base_link"` hardcoded x6 + config key nobody reads — DONE
+P2's mount-pose pull-up (item 2) already collapsed 4 of the 6 literal sites
+(`base_lidar.py`/`base_laser.py`/`camera.py`/`ideal_imu.py`) into one
+(`BaseSensor.__init__`), leaving 3 real sites:
+`base_sensor.py`/`mcap_sink.py`/`visualization_sink.py`.
+
+Added `RobotBundle.root_link: str` (`robot_config.py`), derived from the
+parsed URDF frames (`_root_link_name`: the frame whose `parent` is `None`,
+mirroring `robot._root_link`'s "never a joint child" rule — no second XML
+parse needed since `urdf_frames` already computed this). Threaded
+`robot.root_link` → `SensorSuite.root_link` → `BaseSensor(root_link=...)`
+(replacing the hardcoded `"base_link"` in the mount-pose resolution) and
+→ `StreamContext.root_link` → `McapSink`/`VisualizationSink` (replacing the
+`"base_link"`/`child_frame_id="base_link"` literals). `BaseSensor`'s and
+`StreamContext`'s `root_link` params default to `"base_link"` so the ~10 test
+fixtures that build their own `"base_link"`-rooted frame trees directly
+(bypassing `SensorSuite`) didn't need touching — only the production
+URDF→`SensorSuite`→sink wiring is required to thread the real value.
+Deleted the dead `robot.base_link:` key from `config/config_stream.yaml`
+(confirmed nothing in `robot_config.py` ever read it — no `robot:`-section
+unknown-key check existed to also update). New
+`test_root_link_derived_from_urdf_not_hardcoded` in `test_robot_config.py`
+uses a URDF with a root link named `"torso"` (not `"base_link"`) to prove
+`root_link` is actually derived, not a coincidental default match. Full suite
+green (152 tests).
 
 ## P5 — Carried over from Round 2 (verified still open)
 

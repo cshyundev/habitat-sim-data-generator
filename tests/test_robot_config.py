@@ -104,12 +104,44 @@ class TestValid(_Base):
         names = {f["name"] for f in bundle.frames}
         self.assertEqual(names, {"base_link", "lidar_link", "camera_link", "imu_link"})
         self.assertEqual([s.name for s in bundle.sensors], ["lidar_link", "imu_link"])
+        # root_link is derived from the URDF (the link never a joint child),
+        # not read from config -- item 9.
+        self.assertEqual(bundle.root_link, "base_link")
 
     def test_zup_mount_becomes_yup_frame(self):
         bundle = load_robot(self._config())
         lidar = next(f for f in bundle.frames if f["name"] == "lidar_link")
         # URDF Z-up z=0.3 -> Habitat Y-up y=0.3.
         np.testing.assert_allclose(lidar["position"], [0.0, 0.3, 0.0], atol=1e-6)
+
+    def test_root_link_derived_from_urdf_not_hardcoded(self):
+        """root_link tracks the URDF's actual root, not a fixed 'base_link' string."""
+        urdf_text = (
+            '<?xml version="1.0"?>\n'
+            '<robot name="custom">\n'
+            '  <link name="torso">\n'
+            '    <collision><origin xyz="0 0 0.8" rpy="0 0 0"/>'
+            '<geometry><cylinder radius="0.15" length="1.6"/></geometry></collision>\n'
+            "  </link>\n"
+            '  <link name="lidar_link"/>\n'
+            '  <joint name="lidar_joint" type="fixed">\n'
+            '    <parent link="torso"/>\n'
+            '    <child link="lidar_link"/>\n'
+            '    <origin xyz="0 0 0.3" rpy="0 0 0"/>\n'
+            "  </joint>\n"
+            "</robot>\n"
+        )
+        urdf_path = os.path.join(self.dir, "custom.urdf")
+        with open(urdf_path, "w") as f:
+            f.write(urdf_text)
+
+        sensors = [
+            {"link": "lidar_link", "type": "lidar3d", "hz": 10,
+             "outputs": {"point_cloud": {}},
+             "parameters": {"min_distance": 0.1, "max_distance": 30.0}},
+        ]
+        bundle = load_robot(self._config(sensors=sensors, urdf=urdf_path))
+        self.assertEqual(bundle.root_link, "torso")
 
     def test_file_urdf_loads_frames(self):
         text = cylinder_urdf(1.6, 0.15, mounts=MOUNTS)

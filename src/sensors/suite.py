@@ -3,7 +3,7 @@ import habitat_sim
 
 from src.utils.tf import TFManager
 from src.datatypes.motion_state import MotionState
-from src.sensors.base_sensor import OUTPUT_PAYLOAD_CHECKS, BaseSensor
+from src.sensors.base_sensor import OUTPUT_PAYLOAD_CHECKS, OUTPUT_ROS_CONVERTERS, BaseSensor
 from src.sensors.registry import get_sensor_class
 from src.robot_config import RobotBundle, SensorSpec
 from src.runtime_config import RaycastingConfig
@@ -34,6 +34,7 @@ class SensorSuite:
         """
         # 1. Initialize TF Manager from the URDF-derived frame tree.
         self.tf_manager = TFManager(robot.frames)
+        self.root_link = robot.root_link
 
         # 2. Shared Scene (geometry + semantics + ray-casting; backend from the
         #    raycasting slice). One instance is shared by every sensor so it is
@@ -71,6 +72,7 @@ class SensorSuite:
                 tf_manager=self.tf_manager,
                 scene=self.scene,
                 output_names=list(spec.outputs),
+                root_link=self.root_link,
             )
             sensor = sensor_cls(**kwargs)
             self.sensors.append(sensor)
@@ -179,19 +181,24 @@ class SensorSuite:
     def capture_outputs(
         self, sensor: BaseSensor, raw_outputs: Dict[str, object]
     ) -> Dict[str, object]:
-        """Normalize and validate one sensor's returned output mapping.
+        """Normalize, validate, and Habitat->ROS-convert one sensor's outputs.
 
         The single payload-type check for the whole pipeline: every output
         name with an entry in ``OUTPUT_PAYLOAD_CHECKS`` must pass that
-        output's validator. Downstream sinks (MCAP, visualization) trust this
-        and no longer re-check.
+        output's validator. Also the single conversion point: an output name
+        with an entry in ``OUTPUT_ROS_CONVERTERS`` (point_cloud/imu/bbox3d --
+        the outputs that carry a 3D position/orientation) is converted here,
+        once, so every sink downstream (MCAP, visualization) reads
+        already-ROS-frame data and neither re-derives nor risks forgetting
+        the conversion itself.
 
         Args:
             sensor: Sensor that produced ``raw_outputs``.
             raw_outputs: Mapping returned by ``sensor.get_observation``.
 
         Returns:
-            Output mapping with lowercased output names.
+            Output mapping with lowercased output names, ROS-frame payloads
+            for the output names in ``OUTPUT_ROS_CONVERTERS``.
 
         Raises:
             RuntimeError: If the sensor returns a non-mapping payload, an
@@ -220,5 +227,6 @@ class SensorSuite:
                         f"Sensor '{sensor.name}.{output_key}': expected "
                         f"{description} payload, got {type(payload).__name__}."
                     )
-            outputs[output_key] = payload
+            convert = OUTPUT_ROS_CONVERTERS.get(output_key)
+            outputs[output_key] = convert(payload) if convert is not None else payload
         return outputs

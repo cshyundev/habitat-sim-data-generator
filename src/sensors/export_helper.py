@@ -6,7 +6,6 @@ from src.sensors.base_sensor import BaseSensor
 from src.datatypes.laser_scan import LaserScan
 from src.datatypes.point_cloud import PointCloud
 from src.datatypes.imu import Imu
-from src.utils.coords import habitat_to_ros_obb, habitat_to_ros_pointcloud, habitat_to_ros_position
 
 
 def _channel_key(sensor: BaseSensor, output_name: str) -> str:
@@ -24,19 +23,17 @@ def _write_point_cloud(
     payload: object,
     timestamp_ns: int,
 ) -> None:
-    # Payload type already validated once by SensorSuite.capture_outputs.
+    # Payload type already validated and Habitat->ROS-converted once by
+    # SensorSuite.capture_outputs.
     cloud: PointCloud = payload
     if cloud.size == 0:
         return
-
-    ros_points = habitat_to_ros_pointcloud(cloud.points).astype(np.float32)
-    ros_cloud = PointCloud(points=ros_points, timestamp_ns=cloud.timestamp_ns)
 
     exporter.write_point_cloud(
         timestamp_ns=timestamp_ns,
         frame_id=_frame_id(sensor, output_name),
         channel_key=_channel_key(sensor, output_name),
-        cloud=ros_cloud,
+        cloud=cloud,
     )
 
 
@@ -64,21 +61,15 @@ def _write_imu(
     payload: object,
     timestamp_ns: int,
 ) -> None:
-    # Payload type already validated once by SensorSuite.capture_outputs.
+    # Payload type already validated and Habitat->ROS-converted once by
+    # SensorSuite.capture_outputs.
     observation: Imu = payload
-    angular_velocity_ros = habitat_to_ros_position(
-        np.asarray(observation.angular_velocity, dtype=np.float64)
-    )
-    linear_acceleration_ros = habitat_to_ros_position(
-        np.asarray(observation.linear_acceleration, dtype=np.float64)
-    )
-
     exporter.write_imu(
         timestamp_ns=timestamp_ns,
         frame_id=_frame_id(sensor, output_name),
         channel_key=_channel_key(sensor, output_name),
-        angular_velocity=angular_velocity_ros,
-        linear_acceleration=linear_acceleration_ros,
+        angular_velocity=observation.angular_velocity,
+        linear_acceleration=observation.linear_acceleration,
     )
 
 
@@ -163,13 +154,13 @@ def _write_detections3d(
     payload: object,
     timestamp_ns: int,
 ) -> None:
-    world_obbs = (payload or {}).get("world", [])
-    boxes3d_ros = [habitat_to_ros_obb(o) for o in world_obbs]
+    # "world" is already Habitat->ROS-converted once by SensorSuite.capture_outputs.
+    world_obbs_ros = (payload or {}).get("world", [])
     exporter.write_detections3d(
         timestamp_ns=timestamp_ns,
         frame_id=_frame_id(sensor, output_name),
         channel_key=_channel_key(sensor, output_name),
-        obbs=boxes3d_ros,
+        obbs=world_obbs_ros,
     )
 
 

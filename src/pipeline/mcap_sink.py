@@ -132,6 +132,7 @@ class McapSink(StreamSink):
         self.mcap_path = mcap_path
         self.export_config = export_config
         self.exporter: Optional[McapExporter] = None
+        self.root_link: Optional[str] = None
 
     def on_start(self, ctx: StreamContext) -> None:
         """Open the MCAP writer and emit static/latched startup data.
@@ -144,6 +145,7 @@ class McapSink(StreamSink):
         """
         self.exporter = McapExporter(self.mcap_path, self.export_config)
         self.exporter.start()
+        self.root_link = ctx.root_link
         export_config = self.export_config
         sensor_channels = _resolve_sensor_channels(ctx, export_config)
 
@@ -214,10 +216,9 @@ class McapSink(StreamSink):
         """
         if self.exporter is None:
             raise RuntimeError("McapSink.on_start must be called before on_event.")
-        ros_pose = habitat_to_ros_pose(ev.motion_state.pose)
-        self.exporter.write_pose(timestamp_ns=ev.timestamp_ns, frame_id="map", pose=ros_pose)
+        self.exporter.write_pose(timestamp_ns=ev.timestamp_ns, frame_id="map", pose=ev.ros_pose)
         self.exporter.write_dynamic_tf(
-            timestamp_ns=ev.timestamp_ns, frame_id="map", child_frame_id="base_link", pose=ros_pose
+            timestamp_ns=ev.timestamp_ns, frame_id="map", child_frame_id=self.root_link, pose=ev.ros_pose
         )
         for sensor in ev.firing_sensors:
             if sensor.name in ev.observations:

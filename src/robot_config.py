@@ -48,12 +48,16 @@ class RobotBundle:
         sensors: Validated sensor specs keyed to URDF links.
         body_height: Agent capsule height derived from the URDF body.
         body_radius: Agent capsule radius derived from the URDF body.
+        root_link: Name of the URDF root link (the link that is never a
+            joint child) -- the frame every sensor's mount pose and every TF
+            root/publish is relative to. Derived from the URDF, not config.
     """
 
     frames: List[Dict[str, object]]          # TFManager link dicts (Habitat Y-up)
     sensors: List[SensorSpec]
     body_height: float          # agent capsule / navmesh — derived from the URDF body
     body_radius: float
+    root_link: str
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +90,14 @@ def _parse_urdf_frames(text: str) -> List[Dict[str, object]]:
         return urdf_frames(text)
     except Exception as exc:  # malformed XML, etc.
         raise ConfigError(f"robot URDF could not be parsed: {exc}") from exc
+
+
+def _root_link_name(frames: List[Dict[str, object]]) -> str:
+    """The frame with no parent -- the URDF root link (mirrors robot._root_link)."""
+    for f in frames:
+        if f.get("parent") is None:
+            return str(f["name"])
+    raise ConfigError("robot URDF has no root link (cycle or empty).")
 
 
 def _load_sensor_specs(
@@ -246,6 +258,7 @@ def load_robot(config: Dict[str, object]) -> RobotBundle:
     urdf_text, base_dir = _resolve_urdf_text(robot)
     frames = _parse_urdf_frames(urdf_text)
     frame_names = {f["name"] for f in frames}
+    root_link = _root_link_name(frames)
 
     # Body size (agent capsule / navmesh) comes from the URDF body, not config.
     try:
@@ -259,5 +272,6 @@ def load_robot(config: Dict[str, object]) -> RobotBundle:
 
     sensors = _load_sensor_specs(robot, frame_names)
     return RobotBundle(
-        frames=frames, sensors=sensors, body_height=height, body_radius=radius
+        frames=frames, sensors=sensors, body_height=height, body_radius=radius,
+        root_link=root_link,
     )

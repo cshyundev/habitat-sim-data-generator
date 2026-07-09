@@ -3,6 +3,7 @@ import numpy as np
 import yaml
 from PIL import Image
 from src.datatypes.pose import Pose3D
+from src.utils.coords import habitat_to_ros_position
 
 
 # map
@@ -62,13 +63,18 @@ class OccupancyGrid2D:
         img = Image.fromarray(self.data, mode="L")
         img.save(png_path)
         
-        # Prepare YAML metadata
-        # In our coordinate mapping:
-        # ROS X maps to Habitat X
-        # ROS Y maps to Habitat Z (represented in origin.position[2])
-        # ROS Yaw maps to rotation around Habitat Y-axis
-        origin_x = float(self.origin.position[0])
-        origin_y = float(self.origin.position[2])
+        # Prepare YAML metadata. origin is Habitat-frame (see
+        # src.planners.map_converter); convert through the single shared
+        # Habitat->ROS position function rather than hand-mapping axes here.
+        # Yaw needs no conversion: Habitat<->ROS is a proper rotation (det=+1)
+        # with the up axis mapped directly (Y_hab -> Z_ros), so rotation about
+        # either "up" axis is the same numeric angle (see base_sensor.py's
+        # laser_scan note for the same reasoning).
+        origin_ros = habitat_to_ros_position(
+            np.asarray(self.origin.position, dtype=np.float64)
+        )
+        origin_x = float(origin_ros[0])
+        origin_y = float(origin_ros[1])
         origin_yaw = float(self.origin.yaw)
         
         yaml_data = {

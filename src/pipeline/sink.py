@@ -31,6 +31,7 @@ class StreamContext:
     scene_markers: List[dict]
     tf_manager: TFProvider
     sensors: List[BaseSensor]
+    root_link: str = "base_link"
     sensor_outputs: List[str] = field(default_factory=list)
     artifacts: Dict[str, object] = field(default_factory=dict)
     category_names: Optional[Dict[int, str]] = None
@@ -42,15 +43,21 @@ class StreamEvent:
 
     Attributes:
         timestamp_ns: Event timestamp in nanoseconds.
-        motion_state: Robot state at ``timestamp_ns``.
+        motion_state: Robot state at ``timestamp_ns`` (Habitat frame -- the
+            simulator advances from this, so it stays unconverted).
+        ros_pose: ``motion_state.pose`` converted to ROS coordinates once per
+            event (by ``StreamingPipeline``), so every sink reads the same
+            already-converted pose instead of each converting it itself.
         observations: Mapping of sensor name to output payloads. Inner mappings
-            are keyed by declared output name; payload types are validated
-            against ``BaseSensor.OUTPUT_PAYLOAD_CHECKS`` by
-            ``SensorSuite.capture_outputs`` before an event is emitted.
+            are keyed by declared output name; payload types are validated,
+            and point_cloud/imu/bbox3d are Habitat->ROS-converted, once by
+            ``SensorSuite.capture_outputs`` (see ``OUTPUT_PAYLOAD_CHECKS`` /
+            ``OUTPUT_ROS_CONVERTERS``) before an event is emitted.
         firing_sensors: Sensors scheduled at ``timestamp_ns``.
     """
     timestamp_ns: int
     motion_state: MotionState
+    ros_pose: Pose3D
     observations: Dict[str, Dict[str, object]]
     firing_sensors: List[BaseSensor]
 
