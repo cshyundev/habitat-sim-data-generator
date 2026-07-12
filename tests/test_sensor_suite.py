@@ -347,6 +347,22 @@ class _FakePluginSensor(BaseSensor):
         return {"sample": "fake_observation"}
 
 
+class TestNativeSpecContract(unittest.TestCase):
+    def test_native_sensor_returning_no_spec_raises(self):
+        """is_native() promises a habitat SensorSpec; returning None must fail
+        loudly instead of the sensor silently never rendering."""
+        import types as _types
+
+        broken = _types.SimpleNamespace(
+            name="broken_cam",
+            is_native=lambda: True,
+            get_sensor_spec=lambda: None,
+        )
+        fake_suite = _types.SimpleNamespace(sensors=[broken])
+        with self.assertRaises(RuntimeError):
+            SensorSuite.get_native_sensor_specs(fake_suite)
+
+
 class TestSensorRegistry(unittest.TestCase):
     def test_builtin_types_registered(self):
         for type_name in ("lidar3d", "laser2d", "camera", "imu"):

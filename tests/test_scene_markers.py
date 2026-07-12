@@ -28,14 +28,15 @@ class TestDeriveSceneMarkers(unittest.TestCase):
     def test_stage_instance_keeps_identity_pose_and_colors(self):
         verts = _tri()
         colors = np.array([[[10, 20, 30], [40, 50, 60], [70, 80, 90]]], dtype=np.uint8)
-        stage = ObjectMesh(verts, np.zeros((1, 3), dtype=np.float32), object_id=0,
-                            semantic_id=0, mesh_key="stage::x", source="stage",
+        stage = ObjectMesh(verts, np.zeros((1, 3), dtype=np.float32),
+                            mesh_key="stage::x", source="stage",
                             vertex_colors=colors)
         model = SceneModel(
             objects=[stage],
             transforms=np.eye(4, dtype=np.float32)[None, ...],
             motion_type=np.array([STATIC], dtype=np.int8),
             object_ids=np.array([0], dtype=np.int32),
+            semantic_ids=np.array([0], dtype=np.int32),
         )
 
         markers = derive_scene_markers(model)
@@ -64,13 +65,14 @@ class TestDeriveSceneMarkers(unittest.TestCase):
         T[:3, 3] = t
 
         obj = ObjectMesh(verts.astype(np.float32), np.zeros((1, 3), dtype=np.float32),
-                          object_id=5, semantic_id=1, mesh_key="rigid::y", source="rigid",
+                          mesh_key="rigid::y", source="rigid",
                           vertex_colors=None)
         model = SceneModel(
             objects=[obj],
             transforms=T.astype(np.float32)[None, ...],
             motion_type=np.array([DYNAMIC], dtype=np.int8),
             object_ids=np.array([5], dtype=np.int32),
+            semantic_ids=np.array([1], dtype=np.int32),
         )
 
         markers = derive_scene_markers(model)
@@ -94,13 +96,14 @@ class TestDeriveSceneMarkers(unittest.TestCase):
 
     def test_missing_colors_fall_back_to_none(self):
         verts = _tri()
-        obj = ObjectMesh(verts, np.zeros((1, 3), dtype=np.float32), object_id=1,
-                          semantic_id=0, mesh_key="k", source="articulated")
+        obj = ObjectMesh(verts, np.zeros((1, 3), dtype=np.float32),
+                          mesh_key="k", source="articulated")
         model = SceneModel(
             objects=[obj],
             transforms=np.eye(4, dtype=np.float32)[None, ...],
             motion_type=np.array([STATIC], dtype=np.int8),
             object_ids=np.array([1], dtype=np.int32),
+            semantic_ids=np.array([0], dtype=np.int32),
         )
         markers = derive_scene_markers(model)
         self.assertIsNone(markers[0].vertex_colors)
@@ -108,8 +111,8 @@ class TestDeriveSceneMarkers(unittest.TestCase):
     def test_one_marker_per_instance_in_order(self):
         verts = _tri()
         objs = [
-            ObjectMesh(verts, np.zeros((1, 3), dtype=np.float32), object_id=i,
-                       semantic_id=0, mesh_key=f"k{i}", source="rigid")
+            ObjectMesh(verts, np.zeros((1, 3), dtype=np.float32),
+                       mesh_key=f"k{i}", source="rigid")
             for i in range(3)
         ]
         model = SceneModel(
@@ -117,6 +120,7 @@ class TestDeriveSceneMarkers(unittest.TestCase):
             transforms=np.tile(np.eye(4, dtype=np.float32), (3, 1, 1)),
             motion_type=np.array([STATIC, STATIC, STATIC], dtype=np.int8),
             object_ids=np.array([0, 1, 2], dtype=np.int32),
+            semantic_ids=np.zeros(3, dtype=np.int32),
         )
         markers = derive_scene_markers(model)
         self.assertEqual([m.id for m in markers], [0, 1, 2])

@@ -264,6 +264,30 @@ class TestValidationRaises(_Base):
         with self.assertRaises(ConfigError):
             load_robot(self._config(sensors=bad))
 
+    def test_hz_zero_raises(self):
+        # hz=0 otherwise reaches the scheduler and divides by zero.
+        bad = copy.deepcopy(VALID_SENSORS)
+        bad[0]["hz"] = 0
+        with self.assertRaises(ConfigError):
+            load_robot(self._config(sensors=bad))
+
+    def test_hz_negative_raises(self):
+        # hz<0 otherwise makes next_event() return ever-decreasing timestamps
+        # and the streaming loop never terminates.
+        bad = copy.deepcopy(VALID_SENSORS)
+        bad[0]["hz"] = -5
+        with self.assertRaises(ConfigError):
+            load_robot(self._config(sensors=bad))
+
+    def test_hz_non_integer_raises(self):
+        # The scheduler assumes integer hz (SensorSuite._sensor_next_time).
+        for bad_hz in ("abc", 10.5, True):
+            with self.subTest(hz=bad_hz):
+                bad = copy.deepcopy(VALID_SENSORS)
+                bad[0]["hz"] = bad_hz
+                with self.assertRaises(ConfigError):
+                    load_robot(self._config(sensors=bad))
+
     def test_urdf_missing_sensor_frame_raises(self):
         # imu sensor references imu_link, but the URDF omits it -> frame unresolved.
         mounts = [m for m in MOUNTS if m["name"] != "imu_link"]

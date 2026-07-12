@@ -6,7 +6,6 @@ This is the backend's file frontend -- it records optional occupancy grid,
 the existing McapExporter and export_helper.
 """
 import os
-import logging
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -19,8 +18,6 @@ from src.sensors.base_sensor import BaseSensor
 from src.utils.export import McapExporter
 from src.utils.coords import habitat_to_ros_pose, convert_occupancy_grid_to_ros
 from src.sensors.export_helper import export_sensor_data
-
-logger = logging.getLogger(__name__)
 
 
 def _sidecar_path(mcap_path: str, suffix: str) -> str:
@@ -170,27 +167,30 @@ class McapSink(StreamSink):
             },
         )
 
-        # Latched 2D occupancy grid (/map), when a global planner produced one.
+        # Latched 2D occupancy grid (/map). export_map: true is an explicit
+        # request -- a missing artifact means the configured global planner
+        # doesn't produce one, which is a config mismatch, not a skippable
+        # condition (the recording would silently lack a requested channel).
         if export_config.export_map:
             occ_grid = ctx.artifacts.get("occ_grid")
             if occ_grid is None:
-                logger.warning(
-                    "mcap_export.export_map is true but no occupancy grid artifact "
-                    "is available; skipping /map export."
+                raise ConfigError(
+                    "mcap_export.export_map is true but the global planner "
+                    "produced no 'occ_grid' artifact; disable export_map or use "
+                    "a planner that emits an occupancy grid."
                 )
-            else:
-                if "occupancy_grid" not in export_config.channels:
-                    raise ConfigError(
-                        "mcap_export.export_map is true but "
-                        "mcap_export.channels.occupancy_grid is missing."
-                    )
-                origin_pose_ros, ros_map_data = convert_occupancy_grid_to_ros(occ_grid)
-                self.exporter.write_occupancy_grid(
-                    timestamp_ns=0, frame_id="map",
-                    resolution=occ_grid.resolution,
-                    width=occ_grid.width, height=occ_grid.height,
-                    origin_pose=origin_pose_ros, grid_data=ros_map_data,
+            if "occupancy_grid" not in export_config.channels:
+                raise ConfigError(
+                    "mcap_export.export_map is true but "
+                    "mcap_export.channels.occupancy_grid is missing."
                 )
+            origin_pose_ros, ros_map_data = convert_occupancy_grid_to_ros(occ_grid)
+            self.exporter.write_occupancy_grid(
+                timestamp_ns=0, frame_id="map",
+                resolution=occ_grid.resolution,
+                width=occ_grid.width, height=occ_grid.height,
+                origin_pose=origin_pose_ros, grid_data=ros_map_data,
+            )
 
         # Latched 3D scene (/map_3d).
         if ctx.scene_markers:
@@ -221,13 +221,15 @@ class McapSink(StreamSink):
             timestamp_ns=ev.timestamp_ns, frame_id="map", child_frame_id=self.root_link, pose=ev.ros_pose
         )
         for sensor in ev.firing_sensors:
-            if sensor.name in ev.observations:
-                export_sensor_data(
-                    exporter=self.exporter,
-                    sensor=sensor,
-                    outputs=ev.observations[sensor.name],
-                    timestamp_ns=ev.timestamp_ns,
-                )
+            # Direct indexing: observe() emits an entry per firing sensor, so
+            # a missing one is a pipeline contract violation -- skipping it
+            # would silently drop sensor data from the recording.
+            export_sensor_data(
+                exporter=self.exporter,
+                sensor=sensor,
+                outputs=ev.observations[sensor.name],
+                timestamp_ns=ev.timestamp_ns,
+            )
 
     def on_finish(self) -> None:
         """Flush and close the MCAP writer if it was opened."""

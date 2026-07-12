@@ -3,7 +3,6 @@ import numpy as np
 import yaml
 from PIL import Image
 from src.datatypes.pose import Pose3D
-from src.utils.coords import habitat_to_ros_position
 
 
 # map
@@ -70,6 +69,14 @@ class OccupancyGrid2D:
         # with the up axis mapped directly (Y_hab -> Z_ros), so rotation about
         # either "up" axis is the same numeric angle (see base_sensor.py's
         # laser_scan note for the same reasoning).
+        #
+        # Imported here, not at module level: coords itself imports
+        # src.datatypes.pose (triggering this package's __init__), so a
+        # module-level import would close an import cycle that breaks
+        # whichever side is imported first (the stream_data.py entry chain
+        # imports coords first).
+        from src.utils.coords import habitat_to_ros_position
+
         origin_ros = habitat_to_ros_position(
             np.asarray(self.origin.position, dtype=np.float64)
         )

@@ -97,8 +97,10 @@ def observe(
         cam: Target projection model (only when remapping).
 
     Returns:
-        The RGB image; an empty ``(0, 0)`` array if the sensor is absent from
-        the observations.
+        The RGB image.
+
+    Raises:
+        KeyError: If the sensor is absent from the observations.
     """
     obs = sim.get_sensor_observations()
     if name not in obs:

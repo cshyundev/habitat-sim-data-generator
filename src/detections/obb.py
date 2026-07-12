@@ -39,18 +39,26 @@ def _object_obb_world(local_verts: np.ndarray, transform: np.ndarray):
 
 
 def global_obbs(scene_model, categories: Dict[int, str]) -> Dict[int, OBB3D]:
-    """World-frame OBB per instance (keyed by habitat object id). Skips the stage (id 0)."""
+    """World-frame OBB per instance (keyed by habitat object id). Skips the stage (id 0).
+
+    Identity is read from the model's per-instance arrays
+    (``object_ids``/``semantic_ids``), not from ``objects[i]`` -- the
+    :class:`ObjectMesh` there is shared between duplicate placements of one
+    asset and carries no identity.
+    """
     out: Dict[int, OBB3D] = {}
     for i in range(scene_model.num_instances):
-        om = scene_model.objects[i]
-        oid = int(om.object_id)
+        oid = int(scene_model.object_ids[i])
         if oid <= 0:  # stage / building shell -- not an object detection
             continue
-        center_w, R_w, he = _object_obb_world(om.local_verts, scene_model.transforms[i])
+        sem = int(scene_model.semantic_ids[i])
+        center_w, R_w, he = _object_obb_world(
+            scene_model.objects[i].local_verts, scene_model.transforms[i]
+        )
         out[oid] = OBB3D(
             instance_id=oid,
-            class_id=int(om.semantic_id),
-            class_name=name_for(categories, om.semantic_id),
+            class_id=sem,
+            class_name=name_for(categories, sem),
             center=center_w,
             half_extents=he,
             quat_xyzw=matrix_to_quaternion(R_w),

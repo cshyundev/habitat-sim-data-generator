@@ -8,16 +8,19 @@ from src.datatypes.bbox import Detection2D, OBB3D
 
 
 class _FakeMesh:
-    def __init__(self, verts, object_id, semantic_id):
+    def __init__(self, verts):
         self.local_verts = np.asarray(verts, dtype=np.float64)
-        self.object_id = object_id
-        self.semantic_id = semantic_id
 
 
 class _FakeScene:
-    def __init__(self, meshes, transforms):
+    """Mirrors SceneModel's contract: identity lives in per-instance parallel
+    arrays (object_ids/semantic_ids), never on the (shareable) mesh."""
+
+    def __init__(self, meshes, transforms, object_ids, semantic_ids):
         self.objects = meshes
         self.transforms = np.asarray(transforms, dtype=np.float64)
+        self.object_ids = np.asarray(object_ids, dtype=np.int32)
+        self.semantic_ids = np.asarray(semantic_ids, dtype=np.int32)
 
     @property
     def num_instances(self):
@@ -71,7 +74,7 @@ class TestOBB3D(unittest.TestCase):
     def test_global_obb_center_and_extents(self):
         T = np.eye(4)
         T[:3, 3] = [1.0, 2.0, 3.0]
-        scene = _FakeScene([_FakeMesh(_CUBE, object_id=5, semantic_id=20)], [T])
+        scene = _FakeScene([_FakeMesh(_CUBE)], [T], object_ids=[5], semantic_ids=[20])
         obbs = global_obbs(scene, CATS)
         self.assertIn(5, obbs)
         np.testing.assert_allclose(obbs[5].center, [1, 2, 3], atol=1e-9)
@@ -79,7 +82,9 @@ class TestOBB3D(unittest.TestCase):
         self.assertEqual(obbs[5].class_name, "chair")
 
     def test_stage_id_skipped(self):
-        scene = _FakeScene([_FakeMesh(_CUBE, object_id=0, semantic_id=0)], [np.eye(4)])
+        scene = _FakeScene(
+            [_FakeMesh(_CUBE)], [np.eye(4)], object_ids=[0], semantic_ids=[0]
+        )
         self.assertEqual(global_obbs(scene, CATS), {})
 
     def test_obb_to_camera_translation(self):

@@ -135,7 +135,9 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
                 "top_left": (0, 0),
                 "top_right": (W - 1, 0),
             }
-            start_grid = corners.get(start_corner, (0, H - 1))
+            # Validated at config parse (ZigzagCoverageParams.from_config); a
+            # KeyError here means a per-call override bypassed validation.
+            start_grid = corners[start_corner]
 
         free_mask = occ_grid.data == GRID_2D_FREE
         grid_path = bcd.connect_paths(cell_paths, start_grid, safe_mask, free_mask)

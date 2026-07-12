@@ -37,11 +37,14 @@ def face_normals(verts: np.ndarray) -> np.ndarray:
 class ObjectMesh:
     """Immutable triangle mesh of one object in its **local** frame.
 
+    Deliberately identity-free: one ``ObjectMesh`` is shared by every instance
+    of the same asset (``mesh_key`` dedup), so per-instance identity
+    (object/semantic ids, transform, motion type) lives in ``SceneModel``'s
+    parallel arrays, never here.
+
     Attributes:
         local_verts: ``float32[Fi, 3, 3]`` -- local-frame triangle vertices.
         face_normal: ``float32[Fi, 3]`` -- local-frame unit face normals.
-        object_id: habitat object id reported for hits on this instance.
-        semantic_id: habitat semantic class id.
         mesh_key: identity of the underlying geometry (asset path + scale); two
             instances with the same key share one acceleration structure (BLAS).
         source: which extraction path produced this mesh -- ``"stage"``,
@@ -55,8 +58,6 @@ class ObjectMesh:
 
     local_verts: np.ndarray
     face_normal: np.ndarray
-    object_id: int
-    semantic_id: int
     mesh_key: str
     source: str = "rigid"
     vertex_colors: Optional[np.ndarray] = None
@@ -72,14 +73,17 @@ class SceneModel:
     """A scene as a list of instances plus their mutable per-instance state.
 
     ``objects[i]`` is the local geometry of instance ``i``; ``transforms[i]`` is its
-    current world transform; ``motion_type[i]`` / ``object_ids[i]`` are parallel.
-    Multiple entries may reference the same ``mesh_key`` (shared BLAS).
+    current world transform; ``motion_type[i]`` / ``object_ids[i]`` /
+    ``semantic_ids[i]`` are parallel. Multiple entries may reference the same
+    ``mesh_key`` (shared BLAS) -- which is exactly why identity is carried by
+    these parallel arrays, never by the (shared) :class:`ObjectMesh`.
 
     Attributes:
         objects: per-instance :class:`ObjectMesh` (length K).
         transforms: ``float32[K, 4, 4]`` current world transforms.
         motion_type: ``int8[K]`` -- STATIC / KINEMATIC / DYNAMIC.
         object_ids: ``int32[K]`` -- habitat object id per instance.
+        semantic_ids: ``int32[K]`` -- habitat semantic class id per instance.
         geometry: which asset set was loaded ("visual" or "collision").
     """
 
@@ -87,13 +91,14 @@ class SceneModel:
     transforms: np.ndarray
     motion_type: np.ndarray
     object_ids: np.ndarray
+    semantic_ids: np.ndarray
     geometry: str = "visual"
 
     def __post_init__(self) -> None:
         self.transforms = np.ascontiguousarray(self.transforms, dtype=np.float32)
         self.motion_type = np.ascontiguousarray(self.motion_type, dtype=np.int8)
         self.object_ids = np.ascontiguousarray(self.object_ids, dtype=np.int32)
-        self._id_to_index = {int(oid): i for i, oid in enumerate(self.object_ids)}
+        self.semantic_ids = np.ascontiguousarray(self.semantic_ids, dtype=np.int32)
 
     @property
     def num_instances(self) -> int:
@@ -109,7 +114,3 @@ class SceneModel:
     def num_unique_meshes(self) -> int:
         """Number of unique mesh keys used by the scene."""
         return len({o.mesh_key for o in self.objects})
-
-    def index_of(self, object_id: int) -> int:
-        """Instance index for a habitat ``object_id`` (raises KeyError if absent)."""
-        return self._id_to_index[int(object_id)]

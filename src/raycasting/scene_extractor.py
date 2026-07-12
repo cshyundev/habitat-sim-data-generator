@@ -86,16 +86,14 @@ def _mesh_vertex_colors(mesh, num_verts: int) -> Optional[np.ndarray]:
 
 def _load_triangles(path: str) -> Optional[LoadedMesh]:
     """Load ``path`` as a single mesh -> ``(float64[F, 3, 3] triangles,
-    uint8[F, 3, 3] colors or None)``, or ``None`` if it cannot be loaded / has
-    no faces. Colors are extracted in the same load so scene markers never
-    need a second read of the same asset."""
+    uint8[F, 3, 3] colors or None)``, or ``None`` if the file is missing or
+    holds no triangles. Loader errors propagate -- ``_Builder.add`` turns a
+    ``None`` into a hard error, so nothing here may swallow a failure into a
+    silently smaller scene. Colors are extracted in the same load so scene
+    markers never need a second read of the same asset."""
     if not path or not os.path.exists(path):
         return None
-    try:
-        mesh = trimesh.load(path, force="mesh", process=False)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Failed to load mesh '%s': %s", path, exc)
-        return None
+    mesh = trimesh.load(path, force="mesh", process=False)
     faces = np.asarray(getattr(mesh, "faces", []), dtype=np.int64)
     verts = np.asarray(getattr(mesh, "vertices", []), dtype=np.float64)
     if faces.size == 0 or verts.size == 0:
@@ -166,16 +164,22 @@ UrdfVisual = Tuple[str, np.ndarray, np.ndarray]
 
 
 def _parse_urdf_visuals(urdf_path: str) -> Dict[str, List[UrdfVisual]]:
-    """Map link name -> list of ``(mesh_abs_path, scale[3], origin_4x4)``."""
+    """Map link name -> list of ``(mesh_abs_path, scale[3], origin_4x4)``.
+
+    Raises:
+        RuntimeError: If the URDF is missing or unparseable. habitat already
+            loaded the articulated object from this exact file, so a failure
+            here is a real error -- returning ``{}`` used to drop the whole
+            articulated object silently.
+    """
     out: Dict[str, List[UrdfVisual]] = {}
-    if not os.path.exists(urdf_path):
-        return out
+    if not urdf_path or not os.path.exists(urdf_path):
+        raise RuntimeError(f"articulated-object URDF not found: '{urdf_path}'")
     base = os.path.dirname(urdf_path)
     try:
         root = ET.parse(urdf_path).getroot()
-    except (OSError, ET.ParseError) as exc:  # pragma: no cover - defensive
-        logger.warning("Cannot parse URDF '%s': %s", urdf_path, exc)
-        return out
+    except (OSError, ET.ParseError) as exc:
+        raise RuntimeError(f"cannot parse articulated-object URDF '{urdf_path}': {exc}") from exc
     for link in root.findall("link"):
         visuals: List[UrdfVisual] = []
         for vis in link.findall("visual"):
@@ -196,7 +200,13 @@ def _parse_urdf_visuals(urdf_path: str) -> Dict[str, List[UrdfVisual]]:
 # Per-source instance extraction
 # ---------------------------------------------------------------------------
 class _Builder:
-    """Accumulates instances, sharing local meshes by ``mesh_key``."""
+    """Accumulates instances, sharing local meshes by ``mesh_key``.
+
+    The cached :class:`ObjectMesh` is geometry only -- per-instance identity
+    (object/semantic id, transform, motion) goes into the parallel buffers, so
+    a cache hit (duplicate placement of the same asset) never inherits the
+    first placement's ids.
+    """
 
     def __init__(self) -> None:
         """Initialize empty extraction buffers and mesh cache."""
@@ -205,6 +215,7 @@ class _Builder:
         self.transforms: List[np.ndarray] = []
         self.motion: List[int] = []
         self.object_ids: List[int] = []
+        self.semantic_ids: List[int] = []
 
     def add(
         self,
@@ -216,33 +227,41 @@ class _Builder:
         motion: int,
         source: str,
     ) -> None:
-        """Add one scene instance, loading and caching its local mesh if needed."""
+        """Add one scene instance, loading and caching its local mesh if needed.
+
+        Raises:
+            RuntimeError: If the instance's mesh cannot be loaded or holds no
+                finite triangles. Silently returning here used to make the
+                instance vanish from ray casting AND scene markers.
+        """
         om = self._mesh_cache.get(mesh_key)
         if om is None:
             local = local_loader()
             fin = _finalize(*local) if local is not None else None
             if fin is None:
-                return
+                raise RuntimeError(
+                    f"scene instance (source={source}, object_id={object_id}) has "
+                    f"no loadable mesh for '{mesh_key}' -- missing asset file or "
+                    "no finite triangles."
+                )
             verts, normals, colors = fin
             om = ObjectMesh(
-                verts, normals, int(object_id), int(semantic_id), mesh_key,
-                source=source, vertex_colors=colors,
+                verts, normals, mesh_key, source=source, vertex_colors=colors,
             )
             self._mesh_cache[mesh_key] = om
         self.objects.append(om)
         self.transforms.append(np.asarray(transform, dtype=np.float32))
         self.motion.append(int(motion))
         self.object_ids.append(int(object_id))
+        self.semantic_ids.append(int(semantic_id))
 
 
 def _add_stage(sim, geometry: str, b: _Builder) -> None:
-    try:
-        st = sim.get_stage_initialization_template()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("No stage template available: %s", exc)
-        return
+    # No try/except: a failing stage read means the entire building shell
+    # (walls/floor) would silently disappear from ray casting and markers.
+    st = sim.get_stage_initialization_template()
     path = _asset_path(st, geometry)
-    stage_id = int(getattr(habitat_sim, "stage_id", 0))
+    stage_id = int(habitat_sim.stage_id)
     b.add(
         mesh_key=f"stage::{path}",
         local_loader=lambda: _load_triangles(path),
@@ -268,7 +287,7 @@ def _add_rigid_objects(sim, geometry: str, b: _Builder) -> None:
             ),
             transform=np.asarray(obj.transformation, dtype=np.float32),
             object_id=obj.object_id,
-            semantic_id=int(getattr(obj, "semantic_id", 0)),
+            semantic_id=int(obj.semantic_id),
             motion=_MT_MAP.get(obj.motion_type, DYNAMIC),
             source="rigid",
         )
@@ -296,31 +315,51 @@ def _link_local_mesh(visuals: List[UrdfVisual]) -> Optional[LoadedMesh]:
     return np.concatenate(tri_parts, axis=0), np.concatenate(col_parts, axis=0)
 
 
+def _node_world_matrix(node) -> np.ndarray:
+    """World transform of a habitat scene node as a ``float32[4, 4]``.
+
+    habitat-sim exposes ``absolute_transformation_matrix`` as a *method*
+    (returning a magnum ``Matrix4``); accept a plain property too so fakes and
+    potential future API variants keep working. Treating the method as a
+    property is what used to silently drop every articulated link.
+    """
+    matrix = node.absolute_transformation_matrix
+    if callable(matrix):
+        matrix = matrix()
+    return np.asarray(matrix, dtype=np.float32)
+
+
 def _add_articulated_objects(sim, b: _Builder) -> None:
-    try:
-        aom = sim.get_articulated_object_manager()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("No articulated object manager available: %s", exc)
-        return
+    # Direct API access throughout (no getattr defaults, no blanket except):
+    # this exact function once lost every articulated object to a silently
+    # swallowed attribute mismatch. If habitat's API drifts, fail here.
+    aom = sim.get_articulated_object_manager()
     for handle in aom.get_object_handles():
         ao = aom.get_object_by_handle(handle)
-        urdf = getattr(ao.creation_attributes, "urdf_fullpath", "") or ""
+        urdf = ao.creation_attributes.urdf_fullpath
         link_visuals = _parse_urdf_visuals(urdf)
         if not link_visuals:
-            logger.warning("No URDF visuals for articulated object '%s'", handle)
-            continue
-        link_to_obj = dict(getattr(ao, "link_ids_to_object_ids", {}) or {})
-        semantic = int(getattr(ao, "semantic_id", 0))
+            raise RuntimeError(
+                f"articulated object '{handle}': no mesh visuals found in "
+                f"'{urdf}' -- the object would silently disappear from the scene."
+            )
+        link_to_obj = dict(ao.link_ids_to_object_ids)
+        # Articulated objects expose no semantic_id on the managed object in
+        # this habitat version; the template (creation_attributes) carries it.
+        semantic = int(ao.creation_attributes.semantic_id)
         motion = _MT_MAP.get(ao.motion_type, DYNAMIC)
         for name, visuals in link_visuals.items():
+            # Per-link name resolution stays a warning (not an error): URDF
+            # importers may merge fixed-joint children into their parent, so
+            # a URDF link name can legitimately not exist on the habitat
+            # object. Anything broader failing here is loud in the log.
             try:
                 link_id = ao.get_link_id_from_name(name)
-                world = np.asarray(
-                    ao.get_link_scene_node(link_id).absolute_transformation_matrix,
-                    dtype=np.float32,
-                )
+                world = _node_world_matrix(ao.get_link_scene_node(link_id))
             except Exception:
-                logger.debug("Skipping articulated link '%s' on '%s'", name, handle, exc_info=True)
+                logger.warning(
+                    "Skipping articulated link '%s' on '%s'", name, handle, exc_info=True
+                )
                 continue
             if not np.all(np.isfinite(world)):
                 continue
@@ -368,6 +407,7 @@ def extract_scene_model(
         transforms=np.stack(b.transforms).astype(np.float32),
         motion_type=np.asarray(b.motion, dtype=np.int8),
         object_ids=np.asarray(b.object_ids, dtype=np.int32),
+        semantic_ids=np.asarray(b.semantic_ids, dtype=np.int32),
         geometry=geometry,
     )
 
@@ -395,24 +435,23 @@ def read_dynamic_transforms(
     for handle in rom.get_object_handles():
         o = rom.get_object_by_handle(handle)
         live[int(o.object_id)] = (np.asarray(o.transformation, dtype=np.float32), bool(o.awake))
-    try:
-        aom = sim.get_articulated_object_manager()
-        for handle in aom.get_object_handles():
-            ao = aom.get_object_by_handle(handle)
-            awake = bool(ao.awake)
-            link_to_obj = dict(getattr(ao, "link_ids_to_object_ids", {}) or {})
-            for link_id, oid in link_to_obj.items():
-                try:
-                    T = np.asarray(
-                        ao.get_link_scene_node(link_id).absolute_transformation_matrix,
-                        dtype=np.float32,
-                    )
-                except Exception:
-                    logger.debug("Skipping live articulated link %s on '%s'", link_id, handle, exc_info=True)
-                    continue
-                live[int(oid)] = (T, awake)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("No articulated dynamic transforms available: %s", exc)
+    # Direct API access (no blanket except): a swallowed failure here would
+    # silently freeze every articulated object at its extraction-time pose.
+    aom = sim.get_articulated_object_manager()
+    for handle in aom.get_object_handles():
+        ao = aom.get_object_by_handle(handle)
+        awake = bool(ao.awake)
+        link_to_obj = dict(ao.link_ids_to_object_ids)
+        for link_id, oid in link_to_obj.items():
+            # Same per-link tolerance as extraction (fixed-joint merging).
+            try:
+                T = _node_world_matrix(ao.get_link_scene_node(link_id))
+            except Exception:
+                logger.warning(
+                    "Skipping live articulated link %s on '%s'", link_id, handle, exc_info=True
+                )
+                continue
+            live[int(oid)] = (T, awake)
 
     changes: Dict[int, np.ndarray] = {}
     for i in range(model.num_instances):

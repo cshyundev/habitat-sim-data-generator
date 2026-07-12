@@ -193,23 +193,26 @@ class TestVisualizationSink(unittest.TestCase):
 
         self.assertEqual(backend.paths("points"), ["world/robot/lidar_link/points"])
 
-    def test_unknown_sensor_type_is_skipped(self):
+    def test_sensor_with_no_visualizable_outputs_is_skipped(self):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
         cam = _FakeSensor("cam", "camera", "camera_link")
-        sink.on_event(_event([cam], {"cam": object()}))
+        # The sink renders a deliberate subset of outputs; an output mapping
+        # with nothing it knows how to draw is fine (not an error).
+        sink.on_event(_event([cam], {"cam": {"depth": object()}}))
 
-        # No spatial/scalar sensor logging for an unsupported type; no error.
         self.assertEqual(backend.kinds().count("points"), 0)
         self.assertEqual(backend.kinds().count("scalar"), 0)
 
-    def test_missing_or_none_observation_is_skipped(self):
+    def test_missing_observation_for_firing_sensor_raises(self):
         backend = FakeBackend()
         sink = VisualizationSink(backend)
         imu = _FakeSensor("imu", "imu", "imu_link")
-        # firing lists imu but observations has no entry for it -> get() is None.
-        sink.on_event(_event([imu], {}))
-        self.assertEqual(backend.kinds().count("scalar"), 0)
+        # A firing sensor with no observation entry is a pipeline contract
+        # violation (observe() emits one per firing sensor) -- silently
+        # skipping it would hide dropped sensor data.
+        with self.assertRaises(KeyError):
+            sink.on_event(_event([imu], {}))
 
     def test_empty_lidar_pointcloud_logs_nothing(self):
         backend = FakeBackend()

@@ -347,8 +347,11 @@ class MLXRaycaster(RaycastBackend):
         self._inst_root = mx.array(
             np.array([mesh_root[om.mesh_key] for om in model.objects], dtype=np.int32)
         )
-        self._inst_obj = np.array([om.object_id for om in model.objects], dtype=np.int32)
-        self._inst_sem = np.array([om.semantic_id for om in model.objects], dtype=np.int32)
+        # Identity comes from the model's per-instance arrays, never from the
+        # (mesh_key-shared) ObjectMesh: duplicates of one asset share geometry
+        # but must report their own ids ("hit ids come from the instance").
+        self._inst_obj = np.asarray(model.object_ids, dtype=np.int32)
+        self._inst_sem = np.asarray(model.semantic_ids, dtype=np.int32)
         # interleaved [object_id, semantic_id] per instance (one GPU buffer).
         self._inst_ids_mx = mx.array(
             np.stack([self._inst_obj, self._inst_sem], axis=1).reshape(-1)

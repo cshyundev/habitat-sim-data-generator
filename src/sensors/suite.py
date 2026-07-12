@@ -89,13 +89,22 @@ class SensorSuite:
         """
         Collects SensorSpec definitions from all native sensors.
         Should be registered to habitat_sim.agent.AgentConfiguration.sensor_specifications.
+
+        Raises:
+            RuntimeError: If a sensor claims ``is_native()`` but returns no
+                spec -- registering nothing would make that sensor silently
+                never render.
         """
         specs = []
         for sensor in self.sensors:
             if sensor.is_native():
                 spec = sensor.get_sensor_spec()
-                if spec is not None:
-                    specs.append(spec)
+                if spec is None:
+                    raise RuntimeError(
+                        f"Sensor '{sensor.name}' reports is_native() but "
+                        "returned no habitat SensorSpec."
+                    )
+                specs.append(spec)
         return specs
 
     # ------------------------------------------------------------------

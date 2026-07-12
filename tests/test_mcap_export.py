@@ -11,6 +11,7 @@ from mcap.reader import make_reader
 from mcap_ros2.decoder import DecoderFactory
 
 from src.utils.export import McapExporter
+from src.robot_config import ConfigError
 from src.runtime_config import McapExportConfig
 from src.pipeline.mcap_sink import McapSink, collect_calibrations, write_sidecar_yaml, _sidecar_path
 from src.pipeline.sink import StreamContext
@@ -248,6 +249,12 @@ class TestExportSensorDataValidation(unittest.TestCase):
             0,
         )
 
+    def test_unknown_output_name_raises(self):
+        # An output that reaches the sink without a registered writer would
+        # otherwise silently vanish from the recording.
+        with self.assertRaisesRegex(RuntimeError, "no MCAP writer"):
+            export_sensor_data(object(), _FakeLidar(), {"mystery": object()}, 0)
+
 
 class TestMcapSinkMapExport(unittest.TestCase):
     def test_registers_sensor_output_channels(self):
@@ -282,7 +289,9 @@ class TestMcapSinkMapExport(unittest.TestCase):
             self.assertIn("cam.bbox2d", sink.exporter.channels)
             sink.on_finish()
 
-    def test_export_map_true_without_occ_grid_warns_and_skips(self):
+    def test_export_map_true_without_occ_grid_raises(self):
+        # export_map: true is an explicit request for /map; silently skipping
+        # produced recordings that were missing a requested channel.
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "sample.mcap")
             sink = McapSink(
@@ -299,13 +308,9 @@ class TestMcapSinkMapExport(unittest.TestCase):
                 category_names={},
             )
 
-            with self.assertLogs("src.pipeline.mcap_sink", level="WARNING"):
+            with self.assertRaises(ConfigError):
                 sink.on_start(ctx)
             sink.on_finish()
-
-            with open(path, "rb") as f:
-                summary = make_reader(f).get_summary()
-            self.assertEqual(summary.channels, {})
 
 
 if __name__ == "__main__":

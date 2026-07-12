@@ -2,6 +2,22 @@ from dataclasses import dataclass, asdict
 from typing import Dict
 
 from src.planners.params_util import require_positive, reject_unknown_keys
+from src.robot_config import ConfigError
+
+# Enum-valued params, validated at the config boundary: bcd string-compares
+# sweep_direction (an unknown value would silently sweep vertically) and the
+# planner picks the start cell from a corner table (an unknown value would
+# silently fall back to bottom_left).
+_SWEEP_DIRECTIONS = ("horizontal", "vertical")
+_START_CORNERS = ("bottom_left", "bottom_right", "top_left", "top_right")
+
+
+def _require_choice(p_cfg: Dict[str, object], key: str, choices, ctx: str) -> None:
+    if key in p_cfg and p_cfg[key] not in choices:
+        raise ConfigError(
+            f"{ctx}: '{key}' must be one of {', '.join(choices)} "
+            f"(got {p_cfg[key]!r})."
+        )
 
 
 @dataclass
@@ -34,6 +50,8 @@ class ZigzagCoverageParams:
             ctx,
         )
         require_positive(p_cfg, ("resolution", "wall_distance", "zigzag_spacing"), ctx)
+        _require_choice(p_cfg, "sweep_direction", _SWEEP_DIRECTIONS, ctx)
+        _require_choice(p_cfg, "start_corner", _START_CORNERS, ctx)
         return cls(
             resolution=p_cfg.get("resolution", 0.05),
             wall_distance=p_cfg.get("wall_distance", 0.3),

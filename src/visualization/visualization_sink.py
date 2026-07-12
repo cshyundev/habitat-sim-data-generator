@@ -132,11 +132,10 @@ class VisualizationSink(StreamSink):
         self.backend.log_trajectory(self.trajectory_path, list(self._trajectory), _TRAJECTORY_COLOR)
 
         for sensor in ev.firing_sensors:
-            observation = ev.observations.get(sensor.name)
-            if observation is None:
-                continue
-            if isinstance(observation, dict):
-                self.log_outputs(sensor, observation)
+            # Direct indexing: observe() emits an entry per firing sensor, so
+            # a missing one is a pipeline contract violation -- skipping it
+            # would silently drop sensor data from the live view.
+            self.log_outputs(sensor, ev.observations[sensor.name])
 
     def on_finish(self) -> None:
         """Close the visualization backend."""

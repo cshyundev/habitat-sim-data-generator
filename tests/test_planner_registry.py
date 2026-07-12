@@ -94,5 +94,43 @@ class TestPlannerRegistry(unittest.TestCase):
         self.assertEqual(planner.duration_ns, 1)
 
 
+class TestZigzagParamEnumValidation(unittest.TestCase):
+    """Enum-valued zigzag params must be validated at config-parse time.
+
+    Without this, a typo like sweep_direction: "Horizontal" silently swept
+    vertically (bcd only string-compares against "horizontal"), and an
+    unknown start_corner silently fell back to bottom_left.
+    """
+
+    @staticmethod
+    def _cfg(**params):
+        return {"planner": {"global": {"type": "zigzag", "params": params}}}
+
+    def test_invalid_sweep_direction_raises(self):
+        from src.planners.global_planning.params import ZigzagCoverageParams
+
+        for bad in ("Horizontal", "diagonal", ""):
+            with self.subTest(sweep_direction=bad):
+                with self.assertRaises(ConfigError):
+                    ZigzagCoverageParams.from_config(self._cfg(sweep_direction=bad))
+
+    def test_invalid_start_corner_raises(self):
+        from src.planners.global_planning.params import ZigzagCoverageParams
+
+        for bad in ("top-left", "bottomleft", "center"):
+            with self.subTest(start_corner=bad):
+                with self.assertRaises(ConfigError):
+                    ZigzagCoverageParams.from_config(self._cfg(start_corner=bad))
+
+    def test_valid_enums_pass(self):
+        from src.planners.global_planning.params import ZigzagCoverageParams
+
+        p = ZigzagCoverageParams.from_config(
+            self._cfg(sweep_direction="vertical", start_corner="top_right")
+        )
+        self.assertEqual(p.sweep_direction, "vertical")
+        self.assertEqual(p.start_corner, "top_right")
+
+
 if __name__ == "__main__":
     unittest.main()

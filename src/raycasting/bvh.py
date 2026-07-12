@@ -18,7 +18,6 @@ of it, so the caller reorders its triangle data by ``order`` once at build time.
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from typing import List
 

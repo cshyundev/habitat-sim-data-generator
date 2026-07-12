@@ -204,5 +204,10 @@ def export_sensor_data(
     for output_name, payload in outputs.items():
         output_key = str(output_name).lower()
         writer = _OUTPUT_WRITERS.get(output_key)
-        if writer is not None:
-            writer(exporter, sensor, output_key, payload, timestamp_ns)
+        if writer is None:
+            raise RuntimeError(
+                f"Sensor '{sensor.name}' output '{output_key}' has no MCAP writer "
+                "registered in _OUTPUT_WRITERS -- it would silently vanish from "
+                "the recording."
+            )
+        writer(exporter, sensor, output_key, payload, timestamp_ns)

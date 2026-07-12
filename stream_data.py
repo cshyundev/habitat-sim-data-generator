@@ -63,8 +63,8 @@ def main() -> None:
 
     try:
         logger.info("3. Build Data Pipeline...")
+        # (Trajectory length is planned and logged inside pipeline.run().)
         pipeline = build_pipeline(runtime_config, sim, sensor_suite)
-        logger.info("   - length of trajectory: %.2fs", pipeline.duration_ns / 1e9)
 
         sinks = []
         if not args.no_mcap:

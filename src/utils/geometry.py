@@ -115,7 +115,11 @@ def multiply_quaternions(
 
 def rotate_vectors(vectors: np.ndarray, q_xyzw: np.ndarray) -> np.ndarray:
     """Rotate one or more 3D vectors by quaternion ``[x, y, z, w]``."""
-    return Rotation.from_quat(np.asarray(q_xyzw, dtype=np.float64)).apply(vectors)
+    # numpy/Accelerate matmul emits false-positive FP warnings on finite
+    # input (same as scene_extractor._apply_transform); silence them here so
+    # every per-capture ray rotation doesn't spam the log.
+    with np.errstate(all="ignore"):
+        return Rotation.from_quat(np.asarray(q_xyzw, dtype=np.float64)).apply(vectors)
 
 
 def quaternion_to_habitat_euler(q_xyzw: np.ndarray) -> Tuple[float, float, float]:

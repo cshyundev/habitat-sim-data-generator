@@ -74,31 +74,31 @@ class SimRaycastBackend(RaycastBackend):
         self._obj_id_to_sem_id: Dict[int, int] = {}
 
     def bind(self, sim: habitat_sim.Simulator) -> None:
-        """Cache the simulator and build object-id to semantic-id lookup."""
+        """Cache the simulator and build object-id to semantic-id lookup.
+
+        Direct API access, no fallback: a swallowed failure here used to
+        silently map every hit to semantic_id 0, producing plausible-looking
+        but wrong semantic ground truth.
+        """
         self._sim = sim
         self._obj_id_to_sem_id = {0: 0}  # stage_id (0) maps to semantic_id 0
         if sim is not None:
             # 1. Rigid objects
-            try:
-                rom = sim.get_rigid_object_manager()
-                for handle in rom.get_object_handles():
-                    o = rom.get_object_by_handle(handle)
-                    self._obj_id_to_sem_id[int(o.object_id)] = int(getattr(o, "semantic_id", 0))
-            except Exception as exc:
-                logger.debug("Rigid-object semantic lookup unavailable: %s", exc)
+            rom = sim.get_rigid_object_manager()
+            for handle in rom.get_object_handles():
+                o = rom.get_object_by_handle(handle)
+                self._obj_id_to_sem_id[int(o.object_id)] = int(o.semantic_id)
 
             # 2. Articulated objects
-            try:
-                aom = sim.get_articulated_object_manager()
-                for handle in aom.get_object_handles():
-                    ao = aom.get_object_by_handle(handle)
-                    sem_id = int(getattr(ao, "semantic_id", 0))
-                    link_to_obj = dict(getattr(ao, "link_ids_to_object_ids", {}) or {})
-                    for oid in link_to_obj.values():
-                        self._obj_id_to_sem_id[int(oid)] = sem_id
-                    self._obj_id_to_sem_id[int(ao.object_id)] = sem_id
-            except Exception as exc:
-                logger.debug("Articulated-object semantic lookup unavailable: %s", exc)
+            aom = sim.get_articulated_object_manager()
+            for handle in aom.get_object_handles():
+                ao = aom.get_object_by_handle(handle)
+                # Managed AOs expose no semantic_id in this habitat version;
+                # the template (creation_attributes) carries it.
+                sem_id = int(ao.creation_attributes.semantic_id)
+                for oid in dict(ao.link_ids_to_object_ids).values():
+                    self._obj_id_to_sem_id[int(oid)] = sem_id
+                self._obj_id_to_sem_id[int(ao.object_id)] = sem_id
 
     def cast_rays(
         self,

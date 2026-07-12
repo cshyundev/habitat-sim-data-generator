@@ -150,6 +150,11 @@ def _load_sensor_specs(
         ctx = f"sensor '{name}'"
         s_type = _require_nonempty_str(s, "type", ctx)
         hz = _require(s, "hz", ctx)
+        # The capture scheduler assumes a positive integer rate
+        # (SensorSuite._sensor_next_time divides by hz); hz=0 would divide by
+        # zero and hz<0 would make the streaming loop never terminate.
+        if isinstance(hz, bool) or not isinstance(hz, int) or hz <= 0:
+            raise ConfigError(f"{ctx}: 'hz' must be a positive integer (got {hz!r}).")
 
         # type must be registered
         try:
@@ -227,7 +232,7 @@ def _load_sensor_specs(
                 name=name,
                 type=s_type,
                 parent_link=parent_link,
-                hz=int(hz),
+                hz=hz,
                 parameters=parameters,
                 outputs=outputs,
             )

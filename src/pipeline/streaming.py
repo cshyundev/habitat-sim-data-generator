@@ -89,6 +89,7 @@ class StreamingPipeline:
         if self.max_duration_ns is not None:
             duration_ns = min(duration_ns, self.max_duration_ns)
         self.duration_ns = duration_ns
+        logger.info("Planned trajectory length: %.2fs", self.duration_ns / 1e9)
 
     def run(self, sinks: List[StreamSink]) -> int:
         """Run the event-driven capture loop.

@@ -107,18 +107,19 @@ def _brute_force(world_tris, origins, directions, min_d, max_d):
 
 
 def _make_scene():
-    """Two instances sharing one quad BLAS at different poses + ids."""
+    """Two instances sharing ONE quad ObjectMesh (the extractor's dedup shape)
+    at different poses, with per-instance ids in the model's parallel arrays."""
     quad = _quad_xy()
     fn = face_normals(quad).astype(np.float32)
-    m0 = ObjectMesh(quad, fn, object_id=10, semantic_id=3, mesh_key="quad")
-    m1 = ObjectMesh(quad, fn, object_id=20, semantic_id=4, mesh_key="quad")
+    mesh = ObjectMesh(quad, fn, mesh_key="quad")
     T0 = _transform(np.eye(3), np.array([0, 0, 3.0]))          # wall at z=3, normal +z
     T1 = _transform(_rot_y(90.0), np.array([3.0, 0, 0.0]))     # wall at x=3, normal +x
     model = SceneModel(
-        objects=[m0, m1],
+        objects=[mesh, mesh],
         transforms=np.stack([T0, T1]),
         motion_type=np.array([KINEMATIC, KINEMATIC], np.int8),
         object_ids=np.array([10, 20], np.int32),
+        semantic_ids=np.array([3, 4], np.int32),
         geometry="visual",
     )
     return model, [T0, T1]
@@ -126,10 +127,10 @@ def _make_scene():
 
 def _world_tris_for(model, transforms):
     out = []
-    for om, T in zip(model.objects, transforms):
+    for i, (om, T) in enumerate(zip(model.objects, transforms)):
         R, t = T[:3, :3], T[:3, 3]
         w = np.einsum("ij,fkj->fki", R, om.local_verts) + t
-        out.append((w, (om.object_id, om.semantic_id)))
+        out.append((w, (int(model.object_ids[i]), int(model.semantic_ids[i]))))
     return out
 
 
@@ -200,10 +201,11 @@ class TestSimRaycastBackendMock(unittest.TestCase):
         rom.get_object_handles.return_value = ["obj_10"]
         rom.get_object_by_handle.return_value = rigid_obj
 
-        # Configure articulated objects
+        # Configure articulated objects (semantic_id lives on the template,
+        # mirroring habitat's API).
         art_obj = MagicMock()
         art_obj.object_id = 20
-        art_obj.semantic_id = 5
+        art_obj.creation_attributes.semantic_id = 5
         art_obj.link_ids_to_object_ids = {1: 21, 2: 22}
         aom.get_object_handles.return_value = ["art_20"]
         aom.get_object_by_handle.return_value = art_obj
