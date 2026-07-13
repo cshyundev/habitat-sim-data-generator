@@ -31,7 +31,7 @@ class ZigzagCoverageParams:
     derived from the URDF and then exposed via the habitat agent.
     """
     resolution: float = 0.05
-    wall_distance: float = 0.3
+    wall_distance: float = 0.1
     zigzag_spacing: float = 0.6
     sweep_direction: str = "horizontal"
     start_corner: str = "bottom_left"
@@ -54,7 +54,7 @@ class ZigzagCoverageParams:
         _require_choice(p_cfg, "start_corner", _START_CORNERS, ctx)
         return cls(
             resolution=p_cfg.get("resolution", 0.05),
-            wall_distance=p_cfg.get("wall_distance", 0.3),
+            wall_distance=p_cfg.get("wall_distance", 0.1),
             zigzag_spacing=p_cfg.get("zigzag_spacing", 0.6),
             sweep_direction=p_cfg.get("sweep_direction", "horizontal"),
             start_corner=p_cfg.get("start_corner", "bottom_left"),

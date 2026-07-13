@@ -208,7 +208,14 @@ def plan_sweeps_for_cells(cells: List[MonotoneCell], spacing: int, sweep_directi
 
 
 def connect_paths(cell_paths: List[List[Tuple[int, int]]], start_grid: Tuple[int, int], safe_mask: np.ndarray, free_mask: np.ndarray) -> List[Tuple[int, int]]:
-    """Connects individual cell paths into a single continuous path using BFS pathfinding in safe mask."""
+    """Connect coverage sweeps with 4-connected paths in the safe mask.
+
+    ``plan_sweeps_for_cells`` intentionally emits only sparse sweep endpoints.
+    Those endpoints are coverage *targets*, not permission to draw a straight
+    segment between them: an endpoint pair can straddle an obstacle or a
+    different projected room.  Expand every connection -- including movement
+    *within* a cell sweep -- through the safe grid before returning it.
+    """
     unvisited = list(cell_paths)
     final_path: List[Tuple[int, int]] = []
 
@@ -252,22 +259,28 @@ def connect_paths(cell_paths: List[List[Tuple[int, int]]], start_grid: Tuple[int
                 best_connection_path = path_to_end
                 reverse_cell_path = True
 
+        # A different connected component must never become a synthetic
+        # straight-line bridge.  It is unreachable from the current start and
+        # therefore cannot be covered by this ground-robot trajectory.
         if best_idx == -1:
-            cell_path = unvisited.pop(0)
-            final_path.extend(cell_path)
-            current_pos = cell_path[-1]
-            continue
+            break
 
         cell_path = unvisited.pop(best_idx)
         if best_connection_path:
             final_path.extend(best_connection_path[1:])
 
-        if reverse_cell_path:
-            final_path.extend(reversed(cell_path))
-            current_pos = cell_path[0]
-        else:
-            final_path.extend(cell_path)
-            current_pos = cell_path[-1]
+        ordered_targets = list(reversed(cell_path)) if reverse_cell_path else cell_path
+        current_pos = ordered_targets[0]
+
+        # Expand each sparse boustrophedon endpoint into an actual safe route.
+        for target in ordered_targets[1:]:
+            segment = _find_bfs_path(safe_mask, free_mask, current_pos, target)
+            if not segment:
+                # This should not happen for a monotone cell, but keeping a
+                # partial valid route is safer than emitting an invalid jump.
+                break
+            final_path.extend(segment[1:])
+            current_pos = target
 
     return final_path
 
@@ -316,24 +329,10 @@ def _find_bfs_path(safe_mask: np.ndarray, free_mask: np.ndarray, start: Tuple[in
                     visited.add((nc, nr))
                     q.append(path + [(nc, nr)])
 
-    # 2. Try free_mask if safe_mask fails
-    q = deque([[start]])
-    visited = {start}
-
-    while q:
-        path = q.popleft()
-        curr = path[-1]
-        if curr == end:
-            return path
-
-        for dc, dr in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            nc, nr = curr[0] + dc, curr[1] + dr
-            if 0 <= nc < W and 0 <= nr < H:
-                if free_mask[nr, nc] and (nc, nr) not in visited:
-                    visited.add((nc, nr))
-                    q.append(path + [(nc, nr)])
-
-    return [start, end]
+    # Do not relax to raw free space or synthesize a direct edge.  Both choices
+    # invalidate the safety margin promised by ``safe_mask`` and were the
+    # source of trajectories cutting through walls.
+    return []
 
 
 def compress_path(path: List[Tuple[int, int]]) -> List[Tuple[int, int]]:

@@ -98,7 +98,9 @@ class TestPlannerAndConverter(unittest.TestCase):
         sim_cfg = habitat_sim.SimulatorConfiguration()
         sim_cfg.scene_dataset_config_file = self.dataset_path
         sim_cfg.scene_id = "apt_0"
-        sim_cfg.enable_physics = False
+        # Collision occupancy maps require the scene's rigid/articulated
+        # collision instances, which habitat only instantiates with physics.
+        sim_cfg.enable_physics = True
         sim_cfg.gpu_device_id = -1
         
         agent_cfg = habitat_sim.agent.AgentConfiguration()

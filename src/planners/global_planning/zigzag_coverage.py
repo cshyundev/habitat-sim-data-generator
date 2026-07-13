@@ -64,20 +64,15 @@ class ZigzagCoveragePlanner(BaseGlobalPlanner):
             agent_height=kwargs.get("agent_height"),  # None -> read from sim agent.
             agent_radius=kwargs.get("agent_radius"),
             resolution=p.resolution,
-            obstacle_radius_m=p.wall_distance,
         )
 
-        # Waypoint height (Habitat Y): start_pose, else agent state, else 0.
+        # Waypoint height (Habitat Y) is the one floor selected while building
+        # the collision grid.  The raw agent state can sit below the navmesh
+        # surface, so using it here would put the generated route outside the
+        # very robot-height volume the map checked.
         height_offset = kwargs.get("height_offset")
         if height_offset is None:
-            if start_pose is not None:
-                height_offset = float(start_pose.position[1])
-            else:
-                try:
-                    height_offset = float(sim.get_agent(0).get_state().position[1])
-                except (AttributeError, IndexError, TypeError, ValueError) as exc:
-                    logger.debug("Could not read agent height from simulator: %s", exc)
-                    height_offset = 0.0
+            height_offset = float(occ_grid.origin.position[1])
 
         waypoints = self._plan_from_map(
             occ_grid, start_pose, height_offset=height_offset, **kwargs

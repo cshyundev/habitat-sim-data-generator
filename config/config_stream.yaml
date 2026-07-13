@@ -12,7 +12,7 @@ planner:
     type: "zigzag"
     params:
       resolution: 0.05 # m / pixel
-      wall_distance: 0.3
+      wall_distance: 0.1
       zigzag_spacing: 0.6
       sweep_direction: "horizontal"
       start_corner: "bottom_left"
