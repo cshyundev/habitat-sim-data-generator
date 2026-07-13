@@ -59,8 +59,17 @@ class TestBox2D(unittest.TestCase):
         obj[10:13, 10:13] = 3       # 3x3 instance -> shorter side 3 < 8
         obj[0:10, 0:10] = 4         # 10x10 instance kept
         sem = np.zeros((20, 20), np.uint32)
+        sem[0:10, 0:10] = 20
         dets = boxes_from_maps(obj, sem, CATS, min_box_px=8)
         self.assertEqual({d.instance_id for d in dets}, {4})
+
+    def test_void_semantic_instance_is_not_a_detection(self):
+        """A ray can hit an object whose semantic annotation is void (0)."""
+        obj = np.zeros((20, 20), np.uint32)
+        obj[0:10, 0:10] = 41
+        sem = np.zeros((20, 20), np.uint32)
+
+        self.assertEqual(boxes_from_maps(obj, sem, CATS), [])
 
     def test_unmapped_class_falls_back_to_numeric_name(self):
         obj = np.zeros((20, 20), np.uint32)

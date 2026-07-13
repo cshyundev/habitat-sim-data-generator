@@ -22,7 +22,9 @@ def boxes_from_maps(
 ) -> List[Detection2D]:
     """Emit one axis-aligned box per instance from per-pixel instance/class maps.
 
-    ``obj``/``sem`` are (H, W) maps of ``object_id``/``semantic_id`` (0 = no hit).
+    ``obj``/``sem`` are (H, W) maps of ``object_id``/``semantic_id``.  An
+    ``object_id`` of 0 is a ray miss; a ``semantic_id`` of 0 is the void /
+    unannotated class and is not emitted as a detection.
     The single source for the 2D-box algorithm; used directly by the camera's
     raycast path (which already holds the maps) and by callers that cast their
     own camera (e.g. ``scripts/visualize_bbox.py``).
@@ -39,6 +41,11 @@ def boxes_from_maps(
             continue
         # class = most common semantic id over the instance's pixels.
         class_id = int(np.bincount(sem[ys, xs].astype(np.int64)).argmax())
+        if class_id == 0:
+            # A real geometry hit may still be unannotated (for example an
+            # articulated asset without a semantic label).  It belongs in the
+            # instance map, but it is not a class-labelled 2D detection.
+            continue
         dets.append(
             Detection2D(
                 instance_id=oid,

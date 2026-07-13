@@ -6,6 +6,7 @@ from src.datatypes.bbox import OBB3D
 from src.datatypes.motion_state import MotionState
 from src.datatypes.pose import Pose3D
 from src.raycasting.types import RaycastResult
+from src.sensors.camera import raycast
 from src.sensors.camera.camera import CameraSensor
 
 
@@ -41,6 +42,17 @@ class _Raycaster:
 
 
 class TestCameraSensor(unittest.TestCase):
+    def test_void_semantic_clears_both_annotation_maps(self):
+        res = RaycastResult.empty(2)
+        res.hit[:] = True
+        res.object_id[:] = [7, 8]
+        res.semantic_id[:] = [20, 0]
+
+        inst, sem = raycast.id_maps(res, np.array([True, True]), height=1, width=2)
+
+        np.testing.assert_array_equal(inst, [[7, 0]])
+        np.testing.assert_array_equal(sem, [[20, 0]])
+
     def _camera_with_params(self, parameters):
         return CameraSensor(
             name="camera_front",

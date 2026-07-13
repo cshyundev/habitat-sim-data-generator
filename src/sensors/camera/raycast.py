@@ -109,8 +109,12 @@ def id_maps(
 ) -> Tuple[InstanceMap, SemanticMap]:
     """Reduce a cast result into ``(instance_map, semantic_map)``.
 
-    Both are ``(H, W)`` uint32 arrays with ``0`` for no hit.
+    Both are ``(H, W)`` uint32 arrays with ``0`` for no labelled hit.  The
+    maps are a paired annotation: geometry with ``semantic_id == 0`` is void,
+    so its object id is cleared as well.  Depth remains a geometric product
+    and is intentionally unaffected by this annotation policy.
     """
-    obj = np.where(hit, res.object_id, 0).astype(np.uint32).reshape(height, width)
-    sem = np.where(hit, res.semantic_id, 0).astype(np.uint32).reshape(height, width)
+    labelled_hit = hit & (res.semantic_id != 0)
+    obj = np.where(labelled_hit, res.object_id, 0).astype(np.uint32).reshape(height, width)
+    sem = np.where(labelled_hit, res.semantic_id, 0).astype(np.uint32).reshape(height, width)
     return InstanceMap(obj), SemanticMap(sem)

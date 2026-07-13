@@ -340,7 +340,8 @@ class CameraSensor(BaseSensor):
 
         Returns:
             Tuple ``(instance_map, semantic_map)``; both are ``(H, W)`` uint32
-            arrays with ``0`` for no hit.
+            arrays with ``0`` for no labelled hit. A void semantic hit clears
+            both maps, preserving their paired-annotation contract.
         """
         res, hit = self._cast(sim, motion_state)
         return raycast.id_maps(res, hit, self.height, self.width)
